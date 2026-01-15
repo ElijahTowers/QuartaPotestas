@@ -1,0 +1,73 @@
+[
+    {
+        "id": 1,
+        "company": "Muskrat Motors",
+        "tagline": "Drive the Future, Today",
+        "description": "Revolutionary electric vehicles that may or may not drive themselves. Batteries sold separately.",
+        "tags": ["TECH", "ECONOMY"]
+    },
+    {
+        "id": 2,
+        "company": "BigTech Solutions",
+        "tagline": "Privacy. Trust. Innovation.",
+        "description": "We collect your data to make your life better. Terms and conditions apply. Forever.",
+        "tags": ["TECH"]
+    },
+    {
+        "id": 3,
+        "company": "PharmaMax",
+        "tagline": "Your Health, Our Profit",
+        "description": "Pills for everything. Side effects may include: dependency, bankruptcy, and existential dread.",
+        "tags": ["HEALTH", "ECONOMY"]
+    },
+    {
+        "id": 4,
+        "company": "Bank of Trust",
+        "tagline": "Your Money is Safe (Probably)",
+        "description": "FDIC insured. Probably. Interest rates subject to change without notice. Terms may apply.",
+        "tags": ["ECONOMY"]
+    },
+    {
+        "id": 5,
+        "company": "EcoClean Industries",
+        "tagline": "Sustainable Pollution",
+        "description": "Greenwashing since 2020. Our products are 100% sustainable (in our marketing materials).",
+        "tags": ["CLIMATE", "ECONOMY"]
+    },
+    {
+        "id": 6,
+        "company": "SecurityFirst",
+        "tagline": "Protecting Your Privacy by Invading It",
+        "description": "Surveillance cameras for your peace of mind. We're always watching. Always.",
+        "tags": ["POLITICS", "TECH"]
+    },
+    {
+        "id": 7,
+        "company": "FoodCorp",
+        "tagline": "Natural Ingredients (Mostly)",
+        "description": "Processed foods with 5% real ingredients. The rest is chemicals and dreams.",
+        "tags": ["HEALTH"]
+    },
+    {
+        "id": 8,
+        "company": "Oil & Gas United",
+        "tagline": "Powering Tomorrow, Polluting Today",
+        "description": "Fossil fuels for the modern world. Climate change is someone else's problem.",
+        "tags": ["CLIMATE", "ECONOMY"]
+    },
+    {
+        "id": 9,
+        "company": "MediaMax",
+        "tagline": "The Truth, Sometimes",
+        "description": "News you can trust (when it's convenient). Clickbait guaranteed or your money back.",
+        "tags": ["POLITICS"]
+    },
+    {
+        "id": 10,
+        "company": "Peaceful Arms Corp",
+        "tagline": "Making the World Safer, One Weapon at a Time",
+        "description": "Defense contractors for peace. Our weapons bring people together (in conflict).",
+        "tags": ["WAR", "ECONOMY"]
+    }
+]
+
