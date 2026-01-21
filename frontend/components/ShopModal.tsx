@@ -1,7 +1,9 @@
 "use client";
 
-import { X, ShoppingCart, DollarSign } from "lucide-react";
+import { useState } from "react";
+import { X, ShoppingCart, DollarSign, PackageOpen } from "lucide-react";
 import { useGame } from "@/context/GameContext";
+import CardPackOpening from "@/components/CardPackOpening";
 
 interface ShopItem {
   id: string;
@@ -42,6 +44,8 @@ interface ShopModalProps {
 
 export default function ShopModal({ isOpen, onClose }: ShopModalProps) {
   const { treasury, purchasedUpgrades, buyUpgrade } = useGame();
+  const [isPackOpen, setIsPackOpen] = useState(false);
+  const [lastClaimed, setLastClaimed] = useState<{ id: string; name: string; image: string } | null>(null);
 
   if (!isOpen) return null;
 
@@ -99,6 +103,38 @@ export default function ShopModal({ isOpen, onClose }: ShopModalProps) {
 
         {/* Items grid */}
         <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+          {/* Booster Pack opener */}
+          <div className="border-2 rounded-lg p-4 border-[#8b6f47]/50 bg-[#1a0f08] hover:border-[#d4af37]/70 transition-all">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <PackageOpen className="w-5 h-5 text-[#d4af37]" />
+                  <h3 className="text-lg font-bold text-[#e8dcc6] font-mono">Booster Pack</h3>
+                </div>
+                <p className="text-sm text-gray-400 mb-2">
+                  Crack open a sealed dossier and claim one asset for your operation.
+                </p>
+                {lastClaimed && (
+                  <p className="text-xs text-[#8b6f47] font-mono">
+                    Last claimed: <span className="text-[#d4af37]">{lastClaimed.name}</span>
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <div className="text-right">
+                  <div className="text-xs text-gray-500 font-mono mb-1">COST</div>
+                  <div className="text-xl font-bold font-mono text-yellow-400">$0</div>
+                </div>
+                <button
+                  onClick={() => setIsPackOpen(true)}
+                  className="px-4 py-2 rounded font-mono text-sm font-bold transition-all bg-[#d4af37] hover:bg-[#e5c04a] text-[#1a0f08] border-2 border-[#8b6f47]"
+                >
+                  OPEN PACK
+                </button>
+              </div>
+            </div>
+          </div>
+
           {shopItems.map((item) => {
             const purchaseCount = getPurchaseCount(item.id);
             const canAfford = treasury >= item.cost;
@@ -169,6 +205,15 @@ export default function ShopModal({ isOpen, onClose }: ShopModalProps) {
           </p>
         </div>
       </div>
+
+      {/* Booster pack overlay (kept outside the modal container so it can cover fully) */}
+      <CardPackOpening
+        isOpen={isPackOpen}
+        onClose={() => setIsPackOpen(false)}
+        onClaim={(card) => {
+          setLastClaimed(card);
+        }}
+      />
     </div>
   );
 }

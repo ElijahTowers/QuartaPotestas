@@ -13,13 +13,14 @@ class AIService:
     DEFAULT_MODEL = "llama3"  # Default Ollama model
     
     @staticmethod
-    def simplify_english(text: str, model: str = None) -> str:
+    def simplify_english(text: str, model: str = None, max_words: int = None) -> str:
         """
         Simplify English text to make it easier to read.
         
         Args:
             text: Original text to simplify
             model: Ollama model name (defaults to DEFAULT_MODEL)
+            max_words: Maximum number of words (optional, used for titles/headlines)
             
         Returns:
             Simplified English text
@@ -27,10 +28,29 @@ class AIService:
         if model is None:
             model = AIService.DEFAULT_MODEL
         
+        word_limit_instruction = ""
+        if max_words:
+            word_limit_instruction = f"""
+CRITICAL WORD LIMIT: You are creating a HEADLINE/TITLE. The output MUST be EXACTLY {max_words} words or fewer. 
+Count your words carefully. This is a headline, not a full sentence - be concise and impactful.
+If the original text is longer, create a shorter headline version that captures the essence in {max_words} words or less.
+DO NOT exceed {max_words} words. If you do, your response is invalid."""
+        
         prompt = f"""Rewrite the following text in simpler, easier-to-understand English. 
 Keep the meaning and key facts the same, but use simpler words and shorter sentences.
 Make it accessible for readers with a basic understanding of English.
-ONLY return the simplified text, nothing else. No explanations, no notes, just the simplified text.
+
+CRITICAL: You MUST preserve ALL geographical information:
+- Country names (e.g., "Swiss", "Switzerland", "American", "French", "German")
+- City names (e.g., "London", "Tokyo", "New York")
+- Region names (e.g., "European", "Asian", "Middle Eastern")
+- Continent names (e.g., "Africa", "Asia", "Europe")
+- Language-related terms (e.g., "English", "Spanish", "Arabic")
+- Nationality terms (e.g., "Swiss", "American", "British")
+
+Do NOT remove or simplify these terms. Keep them exactly as they appear.
+Do NOT add quotation marks or quotes around the text. Return the text directly without surrounding quotes.{word_limit_instruction}
+ONLY return the simplified text, nothing else. No explanations, no notes, no quotes, just the simplified text.
 
 Original text:
 {text}
@@ -43,7 +63,7 @@ Simplified text:"""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a skilled editor who rewrites text in simpler, clearer English. You maintain the original meaning while making it easier to understand."
+                        "content": f"""You are a skilled editor who rewrites text in simpler, clearer English. You maintain the original meaning while making it easier to understand. You ALWAYS preserve geographical information like country names, city names, regions, continents, languages, and nationalities exactly as they appear in the original text.{" When creating headlines or titles, you MUST strictly adhere to word limits and count your words carefully." if max_words else ""}"""
                     },
                     {
                         "role": "user",
@@ -78,7 +98,31 @@ Simplified text:"""
                 result_text = result_text.split("(Note:")[0].strip()
                 result_text = result_text.split("(note:")[0].strip()
             
-            return result_text.strip()
+            # Remove surrounding quotes (both single and double quotes)
+            result_text = result_text.strip()
+            if result_text.startswith('"') and result_text.endswith('"'):
+                result_text = result_text[1:-1].strip()
+            if result_text.startswith("'") and result_text.endswith("'"):
+                result_text = result_text[1:-1].strip()
+            
+            result_text = result_text.strip()
+            
+            # If max_words is specified, verify the word count
+            # Ollama should have respected the limit, but we verify as a safety check
+            if max_words:
+                words = result_text.split()
+                word_count = len(words)
+                
+                # Only truncate if significantly over limit (more than 2 words over)
+                # This is a safety net - Ollama should have already respected the limit
+                if word_count > max_words + 2:
+                    print(f"Warning: Ollama generated {word_count} words (limit: {max_words}), truncating as safety measure")
+                    result_text = " ".join(words[:max_words])
+                elif word_count > max_words:
+                    # Slightly over - give a warning but don't truncate (might break important info)
+                    print(f"Warning: Ollama generated {word_count} words (limit: {max_words}), but keeping full text to preserve information")
+            
+            return result_text
         except Exception as e:
             print(f"Error simplifying text with Ollama: {e}")
             return text  # Return original text if simplification fails

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
   DndContext,
@@ -15,12 +16,9 @@ import {
 import type { DailyEdition, Article } from "@/types/api";
 import { fetchLatestArticles, resetAndIngest } from "@/lib/api";
 import Wire from "@/components/Wire";
-import GridEditor from "@/components/GridEditor";
-import AssistantAvatar from "@/components/AssistantAvatar";
-import EditableTitle from "@/components/EditableTitle";
-import { useEditorReactions } from "@/hooks/useEditorReactions";
-import { useGame } from "@/context/GameContext";
-import { Loader2, AlertCircle, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag } from "lucide-react";
+import GameLayout from "@/components/GameLayout";
+import Assistant from "@/components/Assistant";
+import { Loader2, AlertCircle } from "lucide-react";
 import ShopModal from "@/components/ShopModal";
 
 // Dynamically import Map to avoid SSR issues with Leaflet
@@ -36,6 +34,7 @@ const Map = dynamic(() => import("@/components/Map"), {
 type ViewMode = "map" | "grid";
 
 export default function Home() {
+  const router = useRouter();
   const [dailyEdition, setDailyEdition] = useState<DailyEdition | null>(null);
   const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,23 +43,40 @@ export default function Home() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshProgress, setRefreshProgress] = useState<string>("");
-  const [gridState, setGridState] = useState<any[]>(
-    Array(16).fill(null).map(() => ({
-      articleId: null,
-      variant: null,
-      isAd: false,
-    }))
-  );
   const [activeDragItem, setActiveDragItem] = useState<Article | null>(null);
-  const [gridStats, setGridStats] = useState<{ cash: number; credibility: number }>({
-    cash: 0,
-    credibility: 50,
-  });
   const [isShopOpen, setIsShopOpen] = useState(false);
+  const [subtitleIndex, setSubtitleIndex] = useState(0);
 
-  const placedItems = gridState.filter((c: any) => c && (c.articleId || c.isAd));
-  const editor = useEditorReactions(placedItems, gridStats);
-  const { newspaperName, setNewspaperName } = useGame();
+  // Thematic subtitle messages
+  const wireSubtitles = [
+    "Triangulating signal sources...",
+    "Bypassing Ministry firewalls...",
+    "Listening to police scanners...",
+    "Deciphering encrypted cables...",
+    "Bribing field informants...",
+    "Filtering state propaganda...",
+  ];
+
+  // Cycle through subtitles every 2.5 seconds when refreshing
+  useEffect(() => {
+    if (!isRefreshing) {
+      setSubtitleIndex(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setSubtitleIndex((prev) => (prev + 1) % wireSubtitles.length);
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [isRefreshing, wireSubtitles.length]);
+
+  // Redirect to editor when grid mode is selected
+  useEffect(() => {
+    if (viewMode === "grid") {
+      router.push('/editor');
+    }
+  }, [viewMode, router]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -106,14 +122,7 @@ export default function Home() {
     const edition = await fetchLatestArticles();
     setDailyEdition(edition);
     // Do NOT auto-select - keep current selection (or null)
-    // reset grid since IDs/content can change after a fresh ingest
-    setGridState(
-      Array(16).fill(null).map(() => ({
-        articleId: null,
-        variant: null,
-        isAd: false,
-      }))
-    );
+    // Grid functionality moved to /editor page
   };
 
   const handleRefreshScoops = async () => {
@@ -193,20 +202,6 @@ export default function Home() {
       if (article) {
         setActiveDragItem(article);
       }
-    } else if (activeId.startsWith("grid-item-")) {
-      // Handle grid item drag - find the article or ad being dragged
-      const cellIndex = parseInt(activeId.replace("grid-item-", ""), 10);
-      const cell = gridState[cellIndex];
-      
-      if (cell?.articleId) {
-        const article = dailyEdition?.articles.find((a) => a.id === cell.articleId);
-        if (article) {
-          setActiveDragItem(article);
-        }
-      } else if (cell?.isAd && cell.adId) {
-        // For ads, we could show a preview too, but for now just use the article preview
-        // You might want to create a separate preview for ads
-      }
     }
   };
 
@@ -220,51 +215,11 @@ export default function Home() {
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    // Scenario A: Wire to Grid (existing logic)
-    if (activeId.startsWith("article-") && overId.startsWith("cell-")) {
-      const articleId = parseInt(activeId.replace("article-", ""), 10);
-      const cellIndex = parseInt(overId.replace("cell-", ""));
-      
-      // Update grid state
-      const newGrid = [...gridState];
-      newGrid[cellIndex] = {
-        articleId,
-        variant: "factual",
-        isAd: false,
-      };
-      setGridState(newGrid);
-      return;
-    }
-
-    // Scenario B: Grid to Grid (reordering/swapping)
-    if (activeId.startsWith("grid-item-") && overId.startsWith("cell-")) {
-      const sourceIndex = parseInt(activeId.replace("grid-item-", ""), 10);
-      const targetIndex = parseInt(overId.replace("cell-", ""), 10);
-      
-      // If dragging to the same cell, do nothing
-      if (sourceIndex === targetIndex) return;
-      
-      const newGrid = [...gridState];
-      const sourceCell = newGrid[sourceIndex];
-      const targetCell = newGrid[targetIndex];
-      
-      // Swap the items
-      newGrid[sourceIndex] = targetCell;
-      newGrid[targetIndex] = sourceCell;
-      
-      setGridState(newGrid);
-    }
+    // Grid drag & drop functionality moved to /editor page
   };
 
-  const handleGridChange = (grid: any[]) => {
-    setGridState(grid);
-  };
-
-  // Filter articles to only show those NOT currently placed on the grid
-  const availableArticles = dailyEdition?.articles.filter((article) => {
-    // Check if this article is in any grid cell
-    return !gridState.some((cell) => cell.articleId === article.id);
-  }) || [];
+  // Filter articles - no grid filtering needed since grid moved to /editor
+  const availableArticles = dailyEdition?.articles || [];
 
   return (
     <DndContext
@@ -273,117 +228,51 @@ export default function Home() {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="w-screen h-screen flex bg-[#2a1810] overflow-hidden">
-        {/* Sidebar - The Wire */}
-        <Wire
-          articles={availableArticles}
-          selectedArticleId={selectedArticleId}
-          onArticleSelect={handleArticleSelect}
-          viewMode={viewMode}
-        />
-
-        {/* Main Content Area */}
-        <div className="flex-1 relative flex flex-col h-screen overflow-hidden">
-          {/* Header */}
-          <div className="bg-[#1a0f08] bg-opacity-90 border-b border-[#8b6f47] p-4 paper-texture z-[1000]">
-            <div className="flex items-center justify-between">
-              <div>
-                <EditableTitle
-                  value={newspaperName}
-                  onChange={setNewspaperName}
-                  className="text-2xl font-bold text-[#e8dcc6] font-serif"
-                />
-                <p className="text-sm text-[#8b6f47] mt-1">
-                  {viewMode === "map" ? "The War Room" : "Front Page Editor"}
-                </p>
-                <p className="text-sm text-[#8b6f47] mt-1">
-                  Edition: {new Date(dailyEdition.date).toLocaleDateString()} •{" "}
-                  {dailyEdition.articles.length} scoop{dailyEdition.articles.length !== 1 ? "s" : ""} • Mood:{" "}
-                  {dailyEdition.global_mood || "Unknown"}
-                </p>
-              </div>
-              
-              {/* View Mode Toggle */}
-              <div className="flex gap-2">
-                <button
-                  onClick={handleRefreshScoops}
-                  disabled={isRefreshing}
-                  className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${
-                    isRefreshing
-                      ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
-                      : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-                  }`}
-                  title="Trigger ingest and reload latest scoops"
-                >
-                  {isRefreshing ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-4 h-4" />
-                  )}
-                  <span>{isRefreshing ? "Processing..." : "Fetch new scoops"}</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setViewMode("map");
-                    setSelectedArticleId(null); // Clear selection when switching to map view
-                  }}
-                  className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${
-                    viewMode === "map"
-                      ? "bg-[#d4af37] text-[#1a0f08]"
-                      : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-                  }`}
-                >
-                  <MapIcon className="w-4 h-4" />
-                  Map
-                </button>
-                <button
-                  onClick={() => setViewMode("grid")}
-                  className={`px-4 py-2 rounded transition-colors flex items-center gap-2 ${
-                    viewMode === "grid"
-                      ? "bg-[#d4af37] text-[#1a0f08]"
-                      : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-                  }`}
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                  Grid
-                </button>
-                <button
-                  onClick={() => setIsShopOpen(true)}
-                  className="px-4 py-2 rounded transition-colors flex items-center gap-2 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"
-                >
-                  <ShoppingBag className="w-4 h-4" />
-                  Shop
-                </button>
-              </div>
+      <div className="h-screen flex overflow-hidden bg-[#2a1810]">
+        {/* Left Panel - The Wire */}
+        <div className="h-full flex flex-col bg-[#1a0f08] border-r-2 border-[#8b6f47] paper-texture overflow-hidden flex-shrink-0 w-80">
+          {/* Header with Assistant */}
+          <div className="bg-[#2a1810] border-b border-[#8b6f47] p-4 flex-shrink-0">
+            <div className="mb-3">
+              <Assistant mood="neutral" viewMode="map" />
             </div>
             {refreshError && (
-              <p className="text-xs text-red-400 mt-2">
-                {refreshError}
-              </p>
+              <p className="text-xs text-red-400 mb-2">{refreshError}</p>
             )}
             {refreshProgress && (
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mb-2 flex items-center gap-2">
                 <Loader2 className="w-3 h-3 text-[#d4af37] animate-spin" />
-                <p className="text-xs text-[#d4af37] font-serif">
-                  {refreshProgress}
-                </p>
+                <p className="text-xs text-[#d4af37] font-serif">{refreshProgress}</p>
               </div>
             )}
           </div>
 
+          {/* Wire Content */}
+          <div className="flex-1 overflow-y-auto">
+            <Wire
+              articles={availableArticles}
+              selectedArticleId={selectedArticleId}
+              onArticleSelect={handleArticleSelect}
+              viewMode={viewMode}
+              showHeader={false}
+            />
+          </div>
+        </div>
+
+        {/* Main Content Area with GameLayout */}
+        <div className="flex-1 relative">
           {/* Progress Overlay */}
           {isRefreshing && (
             <div className="absolute inset-0 bg-[#1a0f08] bg-opacity-95 z-[2000] flex items-center justify-center paper-texture">
               <div className="text-center max-w-md p-8">
                 <Loader2 className="w-16 h-16 text-[#d4af37] animate-spin mx-auto mb-6" />
-                <h2 className="text-2xl font-bold text-[#e8dcc6] font-serif mb-4">
-                  Fetching New Scoops
+                <h2 className="text-2xl font-bold text-[#e8dcc6] font-serif mb-4 tracking-wider">
+                  INTERCEPTING THE WIRE
                 </h2>
-                {refreshProgress && (
-                  <p className="text-lg text-[#d4af37] mb-2 font-serif">
-                    {refreshProgress}
-                  </p>
-                )}
+                <p className="text-lg text-[#d4af37] mb-2 font-mono flex items-center justify-center gap-1">
+                  <span>{wireSubtitles[subtitleIndex]}</span>
+                  <span className="inline-block w-2 h-5 bg-[#d4af37] animate-cursor-blink" />
+                </p>
                 <div className="mt-6 w-full bg-[#2a1810] rounded-full h-2 overflow-hidden">
                   <div 
                     className="bg-[#d4af37] h-full transition-all duration-500"
@@ -396,43 +285,42 @@ export default function Home() {
                     }}
                   />
                 </div>
-                <p className="text-sm text-[#8b6f47] mt-4 italic">
-                  This may take a minute...
+                <p className="text-sm text-[#8b6f47] mt-4 italic font-mono">
+                  Stand by for transmission...
                 </p>
               </div>
             </div>
           )}
 
-          {/* Content Area */}
-          <div className="flex-1 overflow-y-auto">
-            {viewMode === "map" ? (
-              <div className="w-full h-full">
+          <GameLayout
+            viewMode={viewMode}
+            onViewModeChange={(mode) => {
+              setViewMode(mode);
+              if (mode === "map") {
+                setSelectedArticleId(null);
+              }
+            }}
+            onRefreshScoops={handleRefreshScoops}
+            onOpenShop={() => setIsShopOpen(true)}
+            isRefreshing={isRefreshing}
+            refreshError={refreshError}
+            refreshProgress={refreshProgress}
+            editionInfo={{
+              date: dailyEdition.date,
+              articleCount: dailyEdition.articles.length,
+              globalMood: dailyEdition.global_mood,
+            }}
+          >
+            {viewMode === "map" && (
+              <div className="w-full h-full map-ocean-bg">
                 <Map
                   articles={dailyEdition?.articles || []}
                   selectedArticleId={selectedArticleId}
                   onArticleSelect={handleArticleSelect}
                 />
               </div>
-            ) : (
-              <div className="w-full">
-                <div className="px-4 pt-4">
-                  <AssistantAvatar
-                    message={editor.message}
-                    mood={editor.mood}
-                    isTalking={editor.isTalking}
-                  />
-                </div>
-                <div className="w-full">
-                  <GridEditor
-                    articles={dailyEdition?.articles || []}
-                    onGridChange={handleGridChange}
-                    initialGrid={gridState}
-                    onStatsChange={setGridStats}
-                  />
-                </div>
-              </div>
             )}
-          </div>
+          </GameLayout>
         </div>
       </div>
       
@@ -464,7 +352,7 @@ function ArticleDragPreview({ article }: { article: Article }) {
         boxShadow: "0 20px 40px rgba(0, 0, 0, 0.5)",
       }}
     >
-      <h3 className="font-bold text-sm mb-2 line-clamp-2 font-serif text-[#e8dcc6]">
+      <h3 className="font-bold text-sm mb-2 font-serif text-[#e8dcc6]">
         {article.original_title}
       </h3>
       <div className="flex items-center gap-2 mb-2 flex-wrap">

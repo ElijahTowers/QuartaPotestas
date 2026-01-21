@@ -18,10 +18,18 @@ from app.models.article import Article
 class IngestionService:
     """Service that orchestrates the daily ingestion of articles."""
     
+    # Test mode: limits articles to 5 for quick testing
+    # Set TEST_MODE=true environment variable to enable
+    # Default: enabled for quick testing
+    TEST_MODE = os.getenv("TEST_MODE", "true").lower() == "true"
+    
     def __init__(self):
         self.rss_service = RSSService()
         self.ai_service = AIService()
         self.geo_service = GeoService()
+        
+        if IngestionService.TEST_MODE:
+            print("[IngestionService] TEST MODE ENABLED - Only processing 5 articles")
     
     def load_ads(self) -> List[dict]:
         """Load predefined ads from JSON file."""
@@ -84,14 +92,20 @@ class IngestionService:
         
         # Process articles
         processed_count = 0
-        for raw_article in raw_articles[:15]:  # Limit to 15 articles per day
+        # In test mode, limit to last 5 articles for quick testing
+        articles_to_process = raw_articles[:5] if IngestionService.TEST_MODE else raw_articles
+        if IngestionService.TEST_MODE and len(raw_articles) > 5:
+            print(f"[IngestionService] TEST MODE: Processing only 5 of {len(raw_articles)} articles")
+        
+        for raw_article in articles_to_process:  # Process all articles from 18:00 yesterday onwards (or 5 in test mode)
             try:
                 # Simplify the original article text using AI
                 original_title = raw_article.get("title", "")
                 original_content = raw_article.get("summary", raw_article.get("description", ""))
                 
                 # Simplify title and content to easier English
-                simplified_title = self.ai_service.simplify_english(original_title)
+                # Title must be maximum 10 words (scoop requirement)
+                simplified_title = self.ai_service.simplify_english(original_title, max_words=10)
                 simplified_content = self.ai_service.simplify_english(original_content)
                 
                 # Use simplified text for variant generation

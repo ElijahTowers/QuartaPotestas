@@ -18,9 +18,21 @@ editions_db: List[Dict[str, Any]] = []
 
 # CORS middleware (will be needed for frontend)
 # IMPORTANT: CORS middleware must be added BEFORE other middleware/routes
+# Allow CORS from localhost and local network IPs
+import os
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    # Add your local network IP here (e.g., "http://192.168.1.209:3000")
+    # Or use wildcard for development: "*" (less secure, but convenient)
+]
+# Allow all origins in development (comment out in production)
+if os.getenv("ENV") != "production":
+    allowed_origins.append("*")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js default ports
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Explicit methods
     allow_headers=["*"],
@@ -47,11 +59,13 @@ async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     print(f"Unhandled exception: {exc}")
     print(traceback.format_exc())
+    # Get origin from request to allow CORS
+    origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal server error: {str(exc)}"},
         headers={
-            "Access-Control-Allow-Origin": "http://localhost:3000",
+            "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
         }
     )

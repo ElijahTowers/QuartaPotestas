@@ -81,17 +81,29 @@ export default function NewspaperLayout({
   const searchParams = useSearchParams();
   const editionId = searchParams.get("id");
   
-  const [publishedItems, setPublishedItems] = useState<PublishedItem[]>(mockPublishedItems);
+  const [publishedItems, setPublishedItems] = useState<PublishedItem[]>(
+    propPublishedItems || mockPublishedItems
+  );
   const [date, setDate] = useState<Date>(propDate || new Date());
   const [editionNumber, setEditionNumber] = useState<number>(propEditionNumber || 42);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ cash: number; credibility: number; readers: number } | null>(null);
 
+  // Update publishedItems when prop changes (for real-time editor preview)
+  useEffect(() => {
+    if (propPublishedItems && !editionId) {
+      setPublishedItems(propPublishedItems);
+    }
+  }, [propPublishedItems, editionId]);
+
   useEffect(() => {
     async function loadEditionData() {
       if (!editionId) {
-        // No ID provided, use mock data
+        // No ID provided, use prop data or mock data
+        if (propPublishedItems) {
+          setPublishedItems(propPublishedItems);
+        }
         return;
       }
 
@@ -186,15 +198,10 @@ export default function NewspaperLayout({
     loadEditionData();
   }, [editionId]);
 
-  // Headline story is the first article in the grid (lowest id/index)
-  const headlineStory = publishedItems
-    .filter((item) => item.type === "article")
-    .sort((a, b) => a.id - b.id)[0];
-  
-  const otherStories = publishedItems.filter(
-    (item) => item.type === "article" && item.id !== headlineStory?.id
-  );
-  const ads = publishedItems.filter((item) => item.type === "ad");
+  // Map published items into row-based layout (matching editor)
+  const row1 = publishedItems.slice(0, 1);
+  const row2 = publishedItems.slice(1, 3);
+  const row3 = publishedItems.slice(3, 6);
 
   const formatDate = (date: Date): string => {
     return date.toLocaleDateString("en-US", {
@@ -218,10 +225,10 @@ export default function NewspaperLayout({
 
   return (
     <div className="min-h-screen bg-[#f4f1ea] py-8 px-4 md:px-8 newspaper-paper-texture">
-      <div className="max-w-6xl mx-auto bg-white shadow-2xl p-8 md:p-12" style={{ fontFamily: "var(--font-merriweather), 'Times New Roman', serif" }}>
+      <div className="max-w-7xl mx-auto vintage-newspaper-paper p-8 md:p-12" style={{ fontFamily: "var(--font-merriweather), 'Times New Roman', serif" }}>
         {/* Masthead */}
-        <header className="text-center mb-8 border-b-4 border-[#1a1a1a] pb-6">
-              <h1 className="text-6xl md:text-8xl font-bold text-[#1a1a1a] mb-4 tracking-tight" style={{ fontFamily: "var(--font-merriweather), 'Times New Roman', serif" }}>
+        <header className="text-center mb-8 border-b-4 border-[#1a1a1a] pb-6 relative z-10">
+              <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl font-bold mb-4 tracking-tight break-words px-2 relative z-10" style={{ fontFamily: "var(--font-merriweather), 'Times New Roman', serif" }}>
                 {newspaperName}
               </h1>
           <div className="flex justify-between items-center text-sm md:text-base text-[#1a1a1a] border-t-2 border-b-2 border-[#1a1a1a] py-2 mt-4">
@@ -244,120 +251,114 @@ export default function NewspaperLayout({
           )}
         </header>
 
-        {/* Main Content Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
-          {/* Headline Story - Spans full width or 2/3 */}
-          {headlineStory && (
-            <article className="md:col-span-8 border-b-2 border-[#1a1a1a] pb-6 mb-6">
-              <div className="mb-2">
-                {headlineStory.location && (
-                  <span className="text-xs uppercase tracking-wider text-[#666]">
-                    {headlineStory.location.toUpperCase()}
-                  </span>
-                )}
-                {headlineStory.variant && (
-                  <span className="text-xs uppercase tracking-wider text-[#666] ml-2">
-                    • {headlineStory.variant.toUpperCase()}
-                  </span>
-                )}
+        {/* Main Content - Match editor layout: 1 / 2 / 3 rows */}
+        <div className="space-y-6">
+          {/* Row 1: 1 breed item */}
+          <div className="grid grid-cols-1 gap-4">
+            {row1.length > 0 ? (
+              row1.map((item) => (
+                <RenderedItem key={`row1-${item.id}`} item={item} size="large" />
+              ))
+            ) : (
+              <div className="border-2 border-dashed border-[#1a1a1a] p-6 text-center text-[#666] italic">
+                Drop article or ad here
               </div>
-              <h2 className="text-4xl md:text-5xl font-bold text-[#1a1a1a] mb-4 leading-tight">
-                {headlineStory.headline}
-              </h2>
-              <div className="text-[#1a1a1a] text-base md:text-lg leading-relaxed">
-                <p>{headlineStory.body}</p>
-              </div>
-            </article>
-          )}
-
-          {/* Right Column - Sub-stories and Ads */}
-          <div className="md:col-span-4 space-y-6">
-            {/* Sub-stories */}
-            {otherStories.slice(0, 2).map((story) => (
-              <article key={story.id} className="border-b border-[#1a1a1a] pb-4">
-                <div className="mb-2">
-                  {story.location && (
-                    <span className="text-xs uppercase tracking-wider text-[#666]">
-                      {story.location.toUpperCase()}
-                    </span>
-                  )}
-                  {story.variant && (
-                    <span className="text-xs uppercase tracking-wider text-[#666] ml-2">
-                      • {story.variant.toUpperCase()}
-                    </span>
-                  )}
-                </div>
-                <h3 className="text-xl md:text-2xl font-bold text-[#1a1a1a] mb-2 leading-tight">
-                  {story.headline}
-                </h3>
-                <p className="text-sm md:text-base text-[#1a1a1a] leading-relaxed">
-                  {story.body}
-                </p>
-              </article>
-            ))}
-
-            {/* Ads */}
-            {ads.slice(0, 2).map((ad) => (
-              <div
-                key={ad.id}
-                className="border-4 border-[#1a1a1a] p-4 bg-[#f9f9f9] relative"
-              >
-                <div className="absolute top-1 right-1">
-                  <span className="text-[8px] uppercase tracking-widest text-[#666]">
-                    SPONSORED
-                  </span>
-                </div>
-                <h4 className="text-lg font-bold text-[#1a1a1a] mb-2">
-                  {ad.headline}
-                </h4>
-                {ad.source && (
-                  <p className="text-xs text-[#666] mb-2 italic">
-                    {ad.source}
-                  </p>
-                )}
-                <p className="text-sm text-[#1a1a1a] leading-relaxed">
-                  {ad.body}
-                </p>
-              </div>
-            ))}
+            )}
           </div>
-        </div>
 
-        {/* Bottom Section - More Stories */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mt-8 border-t-2 border-[#1a1a1a] pt-6">
-          {otherStories.slice(2).map((story) => (
-            <article key={story.id} className="border-r border-[#1a1a1a] pr-4 last:border-r-0">
-              <div className="mb-2">
-                {story.location && (
-                  <span className="text-xs uppercase tracking-wider text-[#666]">
-                    {story.location.toUpperCase()}
-                  </span>
-                )}
-                {story.variant && (
-                  <span className="text-xs uppercase tracking-wider text-[#666] ml-2">
-                    • {story.variant.toUpperCase()}
-                  </span>
-                )}
-              </div>
-              <h3 className="text-lg md:text-xl font-bold text-[#1a1a1a] mb-2 leading-tight">
-                {story.headline}
-              </h3>
-              <p className="text-sm text-[#1a1a1a] leading-relaxed">
-                {story.body}
-              </p>
-            </article>
-          ))}
+          {/* Row 2: 2 items naast elkaar */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            {[0, 1].map((idx) => {
+              const item = row2[idx];
+              return item ? (
+                <RenderedItem key={`row2-${item.id}`} item={item} size="medium" />
+              ) : (
+                <div
+                  key={`row2-placeholder-${idx}`}
+                  className="border-2 border-dashed border-[#1a1a1a] p-6 text-center text-[#666] italic"
+                >
+                  Drop article or ad here
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Row 3: 3 items naast elkaar */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+            {[0, 1, 2].map((idx) => {
+              const item = row3[idx];
+              return item ? (
+                <RenderedItem key={`row3-${item.id}`} item={item} size="small" />
+              ) : (
+                <div
+                  key={`row3-placeholder-${idx}`}
+                  className="border-2 border-dashed border-[#1a1a1a] p-6 text-center text-[#666] italic"
+                >
+                  Drop article or ad here
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Footer */}
         <footer className="mt-8 pt-4 border-t-2 border-[#1a1a1a] text-center">
           <p className="text-xs text-[#666]">
             © {new Date().getFullYear()} {newspaperName}. All rights reserved. | 
-            Printed in Dystopia, USA | 
+            Printed in Dystopia | 
             "The Truth, Sometimes"
           </p>
         </footer>
       </div>
+    </div>
+  );
+}
+
+// Render helpers
+function RenderedItem({ item, size }: { item: PublishedItem; size: "large" | "medium" | "small" }) {
+  if (item.type === "article") {
+    return <RenderedArticle item={item} size={size} />;
+  }
+  return <RenderedAd item={item} size={size} />;
+}
+
+function RenderedArticle({ item, size }: { item: PublishedItem; size: "large" | "medium" | "small" }) {
+  const headingSize =
+    size === "large" ? "text-3xl md:text-4xl" : size === "medium" ? "text-2xl" : "text-xl";
+  const bodySize = size === "large" ? "text-base md:text-lg" : size === "medium" ? "text-sm md:text-base" : "text-sm";
+
+  return (
+    <article className="border-2 border-[#1a1a1a] p-4 bg-[#f9f3e5] shadow-sm">
+      <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wider text-[#666]">
+        {item.location && <span>{item.location.toUpperCase()}</span>}
+        {item.variant && <span>• {item.variant.toUpperCase()}</span>}
+      </div>
+      <h3 className={`${headingSize} font-bold text-[#1a1a1a] mb-3 leading-tight`}>
+        {item.headline}
+      </h3>
+      <p className={`${bodySize} text-[#1a1a1a] leading-relaxed`}>{item.body}</p>
+    </article>
+  );
+}
+
+function RenderedAd({ item, size }: { item: PublishedItem; size: "large" | "medium" | "small" }) {
+  const headingSize = size === "large" ? "text-2xl" : size === "medium" ? "text-xl" : "text-lg";
+  const bodySize = size === "large" ? "text-base" : "text-sm";
+
+  return (
+    <div className="border-4 border-[#1a1a1a] p-4 bg-[#f9f9f9] relative shadow-sm">
+      <div className="absolute top-1 right-1">
+        <span className="text-[8px] uppercase tracking-widest text-[#666]">SPONSORED</span>
+      </div>
+      <h4 className={`${headingSize} font-bold text-[#1a1a1a] mb-2`}>
+        {item.headline}
+      </h4>
+      {item.source && (
+        <p className="text-xs text-[#666] mb-2 italic">
+          {item.source}
+        </p>
+      )}
+      <p className={`${bodySize} text-[#1a1a1a] leading-relaxed`}>{item.body}</p>
     </div>
   );
 }

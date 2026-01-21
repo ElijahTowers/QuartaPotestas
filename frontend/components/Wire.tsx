@@ -10,6 +10,7 @@ interface WireProps {
   selectedArticleId: number | null;
   onArticleSelect: (articleId: number) => void;
   viewMode: "map" | "grid";
+  showHeader?: boolean; // Optional prop to show/hide header
 }
 
 function DraggableArticleItem({ 
@@ -73,7 +74,7 @@ function DraggableArticleItem({
     >
       
       <h3
-        className={`font-bold text-sm mb-2 line-clamp-2 font-serif pr-6 ${
+        className={`font-bold text-sm mb-2 font-serif pr-6 ${
           isSelected ? "text-[#f4e8d0]" : "text-[#e8dcc6]"
         }`}
       >
@@ -125,7 +126,7 @@ function DraggableArticleItem({
   );
 }
 
-export default function Wire({ articles, selectedArticleId, onArticleSelect, viewMode }: WireProps) {
+export default function Wire({ articles, selectedArticleId, onArticleSelect, viewMode, showHeader = true }: WireProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
   const filteredArticles = articles.filter((article) =>
@@ -136,24 +137,26 @@ export default function Wire({ articles, selectedArticleId, onArticleSelect, vie
   return (
     <div className="w-80 h-full bg-[#2a1810] border-r border-[#8b6f47] flex flex-col paper-texture">
       {/* Header */}
-      <div className="p-4 border-b border-[#8b6f47] bg-[#1a0f08]">
-        <div className="flex items-center gap-2 mb-3">
-          <Newspaper className="w-5 h-5 text-[#d4af37]" />
-          <h2 className="text-xl font-bold text-[#e8dcc6] font-serif">The Wire</h2>
+      {showHeader && (
+        <div className="p-4 border-b border-[#8b6f47] bg-[#1a0f08]">
+          <div className="flex items-center gap-2 mb-3">
+            <Newspaper className="w-5 h-5 text-[#d4af37]" />
+            <h2 className="text-xl font-bold text-[#e8dcc6] font-serif">The Wire</h2>
+          </div>
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search scoops..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-3 py-2 bg-[#3a2418] border border-[#8b6f47] rounded text-[#e8dcc6] placeholder:text-[#8b6f47] focus:outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]"
+            />
+          </div>
+          <p className="text-xs text-[#8b6f47] mt-2">
+            {filteredArticles.length} scoop{filteredArticles.length !== 1 ? "s" : ""} incoming
+          </p>
         </div>
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search scoops..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 bg-[#3a2418] border border-[#8b6f47] rounded text-[#e8dcc6] placeholder:text-[#8b6f47] focus:outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]"
-          />
-        </div>
-        <p className="text-xs text-[#8b6f47] mt-2">
-          {filteredArticles.length} scoop{filteredArticles.length !== 1 ? "s" : ""} incoming
-        </p>
-      </div>
+      )}
 
       {/* Articles List */}
       <div className="flex-1 overflow-y-auto">

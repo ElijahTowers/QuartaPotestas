@@ -3,7 +3,7 @@ RSS Service for fetching and parsing news feeds.
 """
 import feedparser
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class RSSService:
@@ -13,6 +13,19 @@ class RSSService:
     DEFAULT_FEEDS = [
         "https://feeds.bbci.co.uk/news/world/rss.xml",  # BBC News World
     ]
+    
+    @staticmethod
+    def get_cutoff_time() -> datetime:
+        """
+        Get the cutoff time: 18:00 yesterday.
+        
+        Returns:
+            datetime object representing 18:00 yesterday
+        """
+        now = datetime.now()
+        yesterday = now - timedelta(days=1)
+        cutoff = yesterday.replace(hour=18, minute=0, second=0, microsecond=0)
+        return cutoff
     
     @staticmethod
     def fetch_feed(feed_url: str) -> List[Dict[str, Any]]:
@@ -61,9 +74,16 @@ class RSSService:
                 }
                 articles.append(article)
             
-            # Sort by published_at (newest first), then take the latest 10
-            articles.sort(key=lambda x: x["published_at"] if x["published_at"] else datetime.min, reverse=True)
-            return articles[:10]  # Return only the 10 newest articles
+            # Filter articles: only include those published from 18:00 yesterday onwards
+            cutoff_time = RSSService.get_cutoff_time()
+            filtered_articles = [
+                article for article in articles 
+                if article["published_at"] and article["published_at"] >= cutoff_time
+            ]
+            
+            # Sort by published_at (newest first)
+            filtered_articles.sort(key=lambda x: x["published_at"] if x["published_at"] else datetime.min, reverse=True)
+            return filtered_articles  # Return all articles from 18:00 yesterday onwards
             
         except Exception as e:
             print(f"Error fetching feed {feed_url}: {e}")
@@ -88,9 +108,21 @@ class RSSService:
             articles = RSSService.fetch_feed(feed_url)
             all_articles.extend(articles)
         
-        # Sort all articles by published_at (newest first) to ensure we get the latest across all feeds
-        all_articles.sort(key=lambda x: x["published_at"] if x["published_at"] else datetime.min, reverse=True)
+        # Filter articles: only include those published from 18:00 yesterday onwards
+        cutoff_time = RSSService.get_cutoff_time()
+        print(f"[RSSService] Filtering articles: cutoff time is {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"[RSSService] Total articles fetched: {len(all_articles)}")
         
-        return all_articles
+        filtered_articles = [
+            article for article in all_articles 
+            if article["published_at"] and article["published_at"] >= cutoff_time
+        ]
+        
+        print(f"[RSSService] Articles after filtering (from 18:00 yesterday): {len(filtered_articles)}")
+        
+        # Sort all articles by published_at (newest first) to ensure we get the latest across all feeds
+        filtered_articles.sort(key=lambda x: x["published_at"] if x["published_at"] else datetime.min, reverse=True)
+        
+        return filtered_articles
     
 

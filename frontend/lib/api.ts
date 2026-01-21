@@ -2,7 +2,29 @@
  * API client for FastAPI backend
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Dynamically determine API URL based on where the frontend is accessed from
+function getApiBaseUrl(): string {
+  // If explicitly set via environment variable, use that
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  
+  // If running in browser, use the same hostname as the frontend
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    // If accessing via localhost or 127.0.0.1, use localhost for backend
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return "http://localhost:8000";
+    }
+    // Otherwise, use the same hostname (for network access)
+    return `http://${hostname}:8000`;
+  }
+  
+  // Fallback for server-side rendering
+  return "http://localhost:8000";
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 async function fetchWithErrorHandling(url: string): Promise<Response> {
   try {

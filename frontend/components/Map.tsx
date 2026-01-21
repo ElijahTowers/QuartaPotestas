@@ -67,6 +67,13 @@ function PanToSelected({
   
   useEffect(() => {
     console.log(`[PanToSelected] Effect triggered with selectedArticleId: ${selectedArticleId}`);
+    
+    // Safety check: ensure map is still valid
+    if (!map || !map.getContainer) {
+      console.log(`[PanToSelected] Map not available, returning early`);
+      return;
+    }
+    
     if (selectedArticleId === null) {
       console.log(`[PanToSelected] selectedArticleId is null, returning early`);
       return;
@@ -116,10 +123,22 @@ function PanToSelected({
       
       // Open the popup after a short delay to allow the map to pan
       const markerRef = markerRefs.current.get(selectedArticleId);
-      if (markerRef) {
-        setTimeout(() => {
-          markerRef.openPopup();
+      if (markerRef && markerRef.getPopup) {
+        const timeoutId = setTimeout(() => {
+          try {
+            // Double-check map is still valid
+            if (!map || !map.getContainer) return;
+            
+            const popup = markerRef.getPopup();
+            if (popup && markerRef.isPopupOpen && !markerRef.isPopupOpen()) {
+              markerRef.openPopup();
+            }
+          } catch (error) {
+            console.warn("Failed to open popup:", error);
+          }
         }, 600); // Wait 600ms for the pan animation to start
+        
+        return () => clearTimeout(timeoutId);
       }
       return;
     }
@@ -162,10 +181,22 @@ function PanToSelected({
     
     // Open the popup after a short delay to allow the map to pan
     const markerRef = markerRefs.current.get(selectedArticleId);
-    if (markerRef) {
-      setTimeout(() => {
-        markerRef.openPopup();
+    if (markerRef && markerRef.getPopup) {
+      const timeoutId = setTimeout(() => {
+        try {
+          // Double-check map is still valid
+          if (!map || !map.getContainer) return;
+          
+          const popup = markerRef.getPopup();
+          if (popup && markerRef.isPopupOpen && !markerRef.isPopupOpen()) {
+            markerRef.openPopup();
+          }
+        } catch (error) {
+          console.warn("Failed to open popup:", error);
+        }
       }, 600); // Wait 600ms for the pan animation to start
+      
+      return () => clearTimeout(timeoutId);
     }
   }, [selectedArticleId, articles, map, markerRefs]);
   
@@ -312,20 +343,35 @@ function MarkerWithPopup({
   
   useEffect(() => {
     if (markerRef.current) {
-      markerRefs.current.set(article.id, markerRef.current);
+      // Only add to refs if marker is fully initialized
+      const marker = markerRef.current;
+      if (marker && marker.getLatLng) {
+        markerRefs.current.set(article.id, marker);
+      }
       
       return () => {
-        markerRefs.current.delete(article.id);
+        // Clean up: remove from refs when component unmounts
+        const currentMarker = markerRefs.current.get(article.id);
+        if (currentMarker === marker) {
+          markerRefs.current.delete(article.id);
+        }
       };
     }
   }, [article.id, markerRefs]);
+  
+  // Safety check: ensure coordinates are valid numbers
+  if (article.location_lat === null || article.location_lat === undefined ||
+      article.location_lon === null || article.location_lon === undefined ||
+      isNaN(article.location_lat) || isNaN(article.location_lon)) {
+    return null;
+  }
   
   const isGlobal = article.location_city?.toLowerCase() === "global";
   
   return (
     <Marker
       ref={markerRef}
-      position={[article.location_lat!, article.location_lon!]}
+      position={[article.location_lat, article.location_lon]}
       icon={createCustomIcon(isSelected, isGlobal)}
       eventHandlers={{
         click: () => {
@@ -391,7 +437,13 @@ export default function Map(props: MapProps) {
   }
 
   return (
-    <div className="w-full h-full relative">
+    <div 
+      className="w-full h-full relative map-ocean-bg" 
+      style={{ 
+        minHeight: '100%',
+        minWidth: '100%'
+      }}
+    >
       <MapContainer
         center={[20, 0]}
         zoom={1.5}

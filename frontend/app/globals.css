@@ -47,6 +47,12 @@ body {
   filter: sepia(40%) contrast(110%) brightness(90%);
 }
 
+/* Seamless ocean background for map container */
+.map-ocean-bg {
+  background-color: #A8B8A8 !important;
+  /* This color matches the sepia-filtered ocean water from OpenStreetMap tiles */
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -76,6 +82,120 @@ body {
 
 .shake-talk {
   animation: shake-talk 0.2s infinite linear;
+}
+
+/* --- VINTAGE NEWSPAPER SPIN & SLAM --- */
+
+@keyframes newspaper-slam {
+  0% {
+    opacity: 0;
+    transform: scale(0.1) rotate(-1080deg); /* Starts tiny and spun around */
+    filter: blur(12px); /* Heavy motion blur due to speed */
+  }
+  60% {
+    opacity: 0.8;
+    transform: scale(1.08) rotate(-180deg); /* Still spinning, overshooting */
+    filter: blur(4px);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1.05) rotate(15deg); /* The "Overshoot" (impact) */
+    filter: blur(1px);
+  }
+  100% {
+    transform: scale(1) rotate(0deg); /* Settles firmly */
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+@keyframes cursor-blink {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+.animate-cursor-blink {
+  animation: cursor-blink 1s step-end infinite;
+}
+
+.animate-spin-slam {
+  /* Longer duration (1.2s) for more dramatic, visible effect */
+  animation: newspaper-slam 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards !important;
+  will-change: transform, filter, opacity;
+  transform-origin: center center;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+/* --- VINTAGE NEWSPAPER AESTHETIC --- */
+
+/* Aged paper base with noise texture */
+.vintage-newspaper-paper {
+  background-color: #e8d5b5;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.3)),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E");
+  box-shadow: 
+    inset 0 0 80px rgba(0, 0, 0, 0.3),
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    inset 0 0 200px rgba(0, 0, 0, 0.1);
+  position: relative;
+}
+
+/* Explicitly remove any crease/fold line */
+.vintage-newspaper-paper::before,
+.vintage-newspaper-paper::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* Ink bleed effect for all text in newspaper - using !important to override Tailwind */
+.vintage-newspaper-paper h1,
+.vintage-newspaper-paper h2,
+.vintage-newspaper-paper h3,
+.vintage-newspaper-paper h4,
+.vintage-newspaper-paper h5,
+.vintage-newspaper-paper h6,
+.vintage-newspaper-paper p,
+.vintage-newspaper-paper span:not([class*="text-"]),
+.vintage-newspaper-paper div {
+  color: #1a1a1a !important;
+  text-shadow: 
+    0 0 1px rgba(50, 30, 10, 0.4),
+    0 1px 1px rgba(50, 30, 10, 0.2) !important;
+}
+
+/* Stronger ink bleed for headings */
+.vintage-newspaper-paper h1 {
+  text-shadow: 
+    0 0 2px rgba(50, 30, 10, 0.5),
+    0 1px 2px rgba(50, 30, 10, 0.3),
+    0 2px 3px rgba(50, 30, 10, 0.2) !important;
+}
+
+.vintage-newspaper-paper h2 {
+  text-shadow: 
+    0 0 1.5px rgba(50, 30, 10, 0.5),
+    0 1px 2px rgba(50, 30, 10, 0.3) !important;
+}
+
+.vintage-newspaper-paper h3 {
+  text-shadow: 
+    0 0 1px rgba(50, 30, 10, 0.4),
+    0 1px 1px rgba(50, 30, 10, 0.25) !important;
+}
+
+/* Override specific Tailwind text color classes */
+.vintage-newspaper-paper [class*="text-\[#1a1a1a\]"],
+.vintage-newspaper-paper [class*="text-\[#666\]"] {
+  color: #1a1a1a !important;
+  text-shadow: 
+    0 0 1px rgba(50, 30, 10, 0.4),
+    0 1px 1px rgba(50, 30, 10, 0.2) !important;
 }
 
 /* Newspaper paper texture - more subtle, cream-colored */
