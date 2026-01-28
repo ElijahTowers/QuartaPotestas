@@ -161,12 +161,13 @@ export default function MorningReport(props: MorningReportProps) {
   const readerDeltaColor = arrowUp ? "text-green-300" : "text-red-300";
 
   const gaugeAngle = useMemo(() => {
-    // Map 0..100 -> -180..0 (semi-circle)
-    // 0% = -180deg (9 o'clock / Left)
-    // 50% = -90deg (12 o'clock / Up)
-    // 100% = 0deg (3 o'clock / Right)
+    // Map 0..100 -> -90..90 (semi-circle, 180 degrees total)
+    // 0% = -90deg (pointing Left)
+    // 50% = 0deg (pointing Up)
+    // 100% = 90deg (pointing Right)
+    // Formula: rotation = (score / 100) * 180 - 90
     const s = clamp(credibilityScore, 0, 100);
-    return -180 + s * 1.8;
+    return (s / 100) * 180 - 90;
   }, [credibilityScore]);
 
   const graphPath = useMemo(() => {
@@ -401,17 +402,17 @@ export default function MorningReport(props: MorningReportProps) {
                       <motion.g
                         // Pivot from bottom-center of the gauge (100, 120)
                         transformOrigin="100 120"
-                        initial={{ rotate: -180 }}
+                        initial={{ rotate: -90 }}
                         animate={
                           step >= 3
-                            ? { rotate: [ -180, gaugeAngle + 8, gaugeAngle - 4, gaugeAngle ] }
-                            : { rotate: -180 }
+                            ? { rotate: [ -90, gaugeAngle + 8, gaugeAngle - 4, gaugeAngle ] }
+                            : { rotate: -90 }
                         }
                         transition={{ duration: 1.2, ease: "easeOut", delay: 3.1 }}
                         onAnimationStart={() => dispatchSfx("gauge_tick")}
                         onAnimationComplete={() => dispatchSfx("gauge_thud")}
                       >
-                        {/* Needle pointing right initially (0deg = 3 o'clock), rotates from -180 to 0 */}
+                        {/* Needle pointing up initially (-90deg = 12 o'clock), rotates to correct angle */}
                         <line x1="100" y1="120" x2="165" y2="120" stroke="#e8dcc6" strokeWidth="3" strokeLinecap="round" />
                         <circle cx="100" cy="120" r="6" fill="#d4af37" />
                       </motion.g>

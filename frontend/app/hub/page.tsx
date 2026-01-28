@@ -1,28 +1,54 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useGame } from "@/context/GameContext";
+import { useAuth } from "@/context/AuthContext";
+import { getRecentTransactions, Transaction, getAudienceSnapshot } from "@/lib/api";
+import AudienceRadar from "@/components/analytics/AudienceRadar";
+import type { AudienceScores } from "@/types/api";
 import GameLayout from "@/components/GameLayout";
 import ShopModal from "@/components/ShopModal";
+import EditableTitle from "@/components/EditableTitle";
 import { motion } from "framer-motion";
 
 export default function HubPage() {
   const router = useRouter();
-  const { treasury } = useGame();
+  const { treasury, newspaperName, setNewspaperName, readers, credibility } = useGame();
+  const { user } = useAuth();
   const [isShopOpen, setIsShopOpen] = useState(false);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
+  const [audienceScores, setAudienceScores] = useState<AudienceScores | null>(null);
+  const [isLoadingAudience, setIsLoadingAudience] = useState(true);
   
-  // TODO: Connect these to actual game state when available
-  const [readers, setReaders] = useState(12500);
-  const [credibility, setCredibility] = useState(65);
-  
-  // Mock recent transactions
-  const recentTransactions = [
-    { date: "Today", description: "Ad Revenue", amount: 1200, type: "income" },
-    { date: "Today", description: "Print Costs", amount: -500, type: "expense" },
-    { date: "Yesterday", description: "Subscription Revenue", amount: 800, type: "income" },
-    { date: "Yesterday", description: "Paper Stock", amount: -300, type: "expense" },
-  ];
+  // Load recent transactions from published editions
+  useEffect(() => {
+    if (user) {
+      setIsLoadingTransactions(true);
+      getRecentTransactions(10)
+        .then((transactions) => {
+          setRecentTransactions(transactions);
+          setIsLoadingTransactions(false);
+        })
+        .catch((error) => {
+          console.error("Failed to load transactions:", error);
+          setIsLoadingTransactions(false);
+        });
+      
+      // Load aggregated audience scores snapshot
+      setIsLoadingAudience(true);
+      getAudienceSnapshot()
+        .then((scores) => {
+          setAudienceScores(scores);
+          setIsLoadingAudience(false);
+        })
+        .catch((error) => {
+          console.error("Failed to load audience snapshot:", error);
+          setIsLoadingAudience(false);
+        });
+    }
+  }, [user]);
 
   const getMoodStatus = (cred: number): string => {
     if (cred >= 70) return "STABLE";
@@ -74,9 +100,53 @@ export default function HubPage() {
           {/* Main Content */}
           <div className="relative z-10 container mx-auto px-6 py-12">
             {/* Page Title */}
-            <h1 className="text-4xl font-bold text-[#e8dcc6] font-serif mb-12 text-center">
-              EXECUTIVE DESK
-            </h1>
+            <div className="mb-8 text-center">
+              <h1 className="text-4xl font-bold text-[#e8dcc6] font-serif mb-2">
+                EXECUTIVE DESK
+              </h1>
+              {user && (
+                <p className="text-lg text-[#d4af37] font-serif italic">
+                  {user.name || user.email || "Unknown User"}
+                </p>
+              )}
+            </div>
+
+            {/* Newspaper Name Editor */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-2xl mx-auto mb-12"
+            >
+              <div
+                className="bg-[#f9f6f0] p-6 rounded shadow-2xl border-2 border-[#8b6f47] relative"
+                style={{
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+                }}
+              >
+                {/* Aged paper texture */}
+                <div
+                  className="absolute inset-0 opacity-10 pointer-events-none rounded"
+                  style={{
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E")`,
+                  }}
+                />
+                
+                <div className="relative z-10">
+                  <p className="text-sm text-[#8b6f47] mb-2 font-mono uppercase tracking-wider">
+                    Publication Name
+                  </p>
+                  <EditableTitle
+                    value={newspaperName}
+                    onChange={setNewspaperName}
+                    className="text-3xl font-bold text-[#1a0f08] font-serif w-full"
+                  />
+                  <p className="text-xs text-[#8b6f47] mt-2 italic">
+                    Click to edit your newspaper's name
+                  </p>
+                </div>
+              </div>
+            </motion.div>
 
         {/* Desk Objects Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-7xl mx-auto">
@@ -120,17 +190,23 @@ export default function HubPage() {
                 <div className="border-t-2 border-[#8b6f47] pt-4">
                   <p className="text-sm font-bold text-[#1a0f08] mb-3">Recent Activity</p>
                   <div className="space-y-2">
-                    {recentTransactions.map((tx, idx) => (
-                      <div key={idx} className="flex justify-between text-sm">
-                        <div>
-                          <p className="text-[#1a0f08]">{tx.description}</p>
-                          <p className="text-xs text-[#8b6f47]">{tx.date}</p>
+                    {isLoadingTransactions ? (
+                      <p className="text-xs text-[#8b6f47] italic">Loading transactions...</p>
+                    ) : recentTransactions.length === 0 ? (
+                      <p className="text-xs text-[#8b6f47] italic">No recent activity. Publish a newspaper to see transactions.</p>
+                    ) : (
+                      recentTransactions.map((tx, idx) => (
+                        <div key={idx} className="flex justify-between text-sm">
+                          <div>
+                            <p className="text-[#1a0f08]">{tx.description}</p>
+                            <p className="text-xs text-[#8b6f47]">{tx.date}</p>
+                          </div>
+                          <p className={`font-bold ${tx.type === "income" ? "text-green-700" : "text-red-700"}`}>
+                            {tx.type === "income" ? "+" : "-"}${tx.amount.toLocaleString()}
+                          </p>
                         </div>
-                        <p className={`font-bold ${tx.type === "income" ? "text-green-700" : "text-red-700"}`}>
-                          {tx.amount > 0 ? "+" : ""}${tx.amount.toLocaleString()}
-                        </p>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -178,8 +254,11 @@ export default function HubPage() {
                 {/* Public Mood */}
                 <div className="border-t border-[#8b6f47] pt-4">
                   <p className="text-sm text-[#8b6f47] mb-1">Public Mood</p>
-                  <p className="text-2xl font-bold text-[#1a0f08] font-mono">
+                  <p className="text-2xl font-bold text-[#1a0f08] font-mono mb-2">
                     {getMoodStatus(credibility)}
+                  </p>
+                  <p className="text-xs text-[#8b6f47]">
+                    Credibility: {credibility.toFixed(0)}%
                   </p>
                 </div>
               </div>
@@ -217,6 +296,16 @@ export default function HubPage() {
                   <div className="w-16 h-16 bg-[#3a2418] rounded-full" />
                 </div>
 
+                {/* User Name */}
+                {user && (
+                  <div className="mb-4 text-center">
+                    <p className="text-sm text-[#8b6f47] mb-1">License Holder</p>
+                    <p className="text-lg font-bold text-[#1a0f08] font-serif">
+                      {user.name || user.email || "Unknown"}
+                    </p>
+                  </div>
+                )}
+
                 {/* Trust Score */}
                 <div className="mb-4 text-center">
                   <p className="text-sm text-[#8b6f47] mb-1">Trust Score</p>
@@ -243,6 +332,42 @@ export default function HubPage() {
                     {status.text}
                   </div>
                 </div>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Object D: Faction Radar */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.3 }}
+            className="relative md:col-span-3"
+          >
+            <div
+              className="bg-[#1a0f08] p-6 rounded shadow-2xl border-2 border-[#8b6f47] relative"
+              style={{
+                boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
+              }}
+            >
+              <div className="absolute inset-0 opacity-20 pointer-events-none" style={{
+                backgroundImage: "radial-gradient(circle at center, rgba(212,175,55,0.15), transparent 60%)",
+              }} />
+              <div className="relative z-10">
+                <h2 className="text-2xl font-bold text-[#e6d5ac] mb-2 font-serif">
+                  Faction Radar
+                </h2>
+                <p className="text-xs text-[#8b6f47] mb-4">
+                  Aggregated reaction of all factions to the latest scoops.
+                </p>
+                {isLoadingAudience || !audienceScores ? (
+                  <p className="text-xs text-[#8b6f47] italic">
+                    Loading faction impact...
+                  </p>
+                ) : (
+                  <div className="w-full max-w-xl mx-auto">
+                    <AudienceRadar audienceScores={audienceScores} size="medium" />
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

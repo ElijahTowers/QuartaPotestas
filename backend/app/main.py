@@ -4,8 +4,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from app.database import engine, Base
-from app.api import debug, articles, ads, submissions
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
+# Import PocketBase API modules
+from app.api import debug_pb as debug, articles_pb as articles, ads, submissions, influence
 
 app = FastAPI(
     title="Quarta Potestas API",
@@ -44,13 +48,24 @@ app.include_router(debug.router, prefix="/api")
 app.include_router(articles.router, prefix="/api")
 app.include_router(ads.router, prefix="/api")
 app.include_router(submissions.router, prefix="/api")
+app.include_router(influence.router, prefix="/api")
+
+# Include auth router
+from app.api import auth
+app.include_router(auth.router, prefix="/api")
+
+# Include feed router
+from app.api import feed
+app.include_router(feed.router, prefix="/api")
+
+# Include published editions router
+from app.api import published_editions
+app.include_router(published_editions.router, prefix="/api")
 
 
 @app.on_event("startup")
 async def startup():
-    # Create tables (for development; use Alembic in production)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    print("✓ Using PocketBase as database backend")
 
 
 @app.exception_handler(Exception)
@@ -83,10 +98,12 @@ async def health():
 
 # Publish endpoint models
 class GridCell(BaseModel):
-    articleId: Optional[int] = None
+    articleId: Optional[str] = None  # Changed from int to str for PocketBase IDs
     variant: Optional[str] = None  # "factual", "sensationalist", "propaganda"
     isAd: bool = False
-    adId: Optional[int] = None
+    adId: Optional[str] = None  # Changed from int to str for string IDs
+    headline: Optional[str] = None  # NEW: Store displayed headline
+    body: Optional[str] = None  # NEW: Store displayed body text
 
 
 class Stats(BaseModel):

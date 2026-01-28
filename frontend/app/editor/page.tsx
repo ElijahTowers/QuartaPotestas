@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import ProtectedRoute from "@/components/ProtectedRoute";
 import {
   DndContext,
   DragEndEvent,
@@ -20,22 +21,27 @@ import Wire from "@/components/Wire";
 import Assistant from "@/components/Assistant";
 import ShopModal from "@/components/ShopModal";
 import MorningReport from "@/components/MorningReport";
-import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase } from "lucide-react";
+import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, Trophy, BookOpen } from "lucide-react";
 import { useGame } from "@/context/GameContext";
+import { useAuth } from "@/context/AuthContext";
+import toast from "react-hot-toast";
+
+// Admin email - only this user can fetch new scoops
+const ADMIN_EMAIL = "lowiehartjes@gmail.com";
 
 type ZoneType = "row1" | "row2" | "row3";
 type VariantType = "factual" | "sensationalist" | "propaganda";
 
 interface PlacedArticle {
   type: "article";
-  articleId: number;
+  articleId: string; // Changed from number to string (PocketBase ID)
   variant: VariantType;
   zoneId: string; // e.g., "row1_0", "row2_0", "row3_1"
 }
 
 interface PlacedAd {
   type: "ad";
-  adId: number;
+  adId: string;  // Changed from number to string
   zoneId: string;
 }
 
@@ -694,6 +700,13 @@ function InteractiveNewspaper({
   const { newspaperName } = useGame();
   const articleMap = new Map(articles.map((a) => [a.id, a]));
   const adMap = new Map(ads.map((a) => [a.id, a]));
+  
+  // Debug logging for ads
+  console.log("[EditorPage] adMap created:", {
+    adsCount: ads.length,
+    adMapSize: adMap.size,
+    adIds: ads.map(a => ({id: a.id, type: typeof a.id})),
+  });
 
   return (
     <div className="min-h-screen bg-transparent py-8 px-4 md:px-8">
@@ -740,6 +753,12 @@ function InteractiveNewspaper({
                   );
                 } else {
                   const ad = adMap.get(placed.adId);
+                  console.log("[Row1 RowAd] Looking up ad:", {
+                    placedAdId: placed.adId,
+                    foundAd: !!ad,
+                    adMapSize: adMap.size,
+                    allAdIds: Array.from(adMap.keys()),
+                  });
                   if (!ad) return null;
                   return (
                     <RowAd
@@ -870,6 +889,8 @@ export default function EditorPage() {
   const [ads, setAds] = useState<Ad[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  const [assistantMessage, setAssistantMessage] = useState<string | undefined>(undefined);
   const [zoneState, setZoneState] = useState<ZoneState>({
     row1: [],
     row2: [],
@@ -895,6 +916,15 @@ export default function EditorPage() {
     editionId: number | null;
   } | null>(null);
 
+  const hasPlacedItems =
+    zoneState.row1.length > 0 || zoneState.row2.length > 0 || zoneState.row3.length > 0;
+
+  const { user } = useAuth();
+  const { newspaperName } = useGame();  // Add this line to get newspaperName
+  
+  // Check if current user is admin
+  const isAdmin = user?.email === ADMIN_EMAIL;
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -911,10 +941,13 @@ export default function EditorPage() {
         const [edition, adsList] = await Promise.all([fetchLatestArticles(), fetchAds()]);
         setDailyEdition(edition);
         setAds(adsList);
+        console.log(`[EditorPage] Loaded ${adsList.length} ads`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to load data";
         setError(errorMessage);
         console.error("Error loading data:", err);
+        // Set empty ads array on error to prevent crashes
+        setAds([]);
       } finally {
         setLoading(false);
       }
@@ -1220,45 +1253,110 @@ export default function EditorPage() {
       
       // Convert zoneState to GridPlacement format (for backend compatibility)
       const placedItems: Array<{
-        articleId: number | null;
+        articleId: string | null;
         variant: "factual" | "sensationalist" | "propaganda" | null;
         isAd: boolean;
-        adId: number | null;
+        adId: string | null;
+        headline?: string;  // NEW: Store displayed headline
+        body?: string;      // NEW: Store displayed body text
       }> = [];
 
       // Add row1 items
       zoneState.row1.forEach((item) => {
         if (item) {
-          placedItems.push({
-            articleId: item.type === "article" ? item.articleId : null,
-            variant: item.variant || "factual",
-            isAd: item.type === "ad",
-            adId: item.type === "ad" ? item.adId : null,
-          });
+          if (item.type === "article") {
+            const article = dailyEdition?.articles.find(a => a.id === item.articleId);
+            if (article) {
+              const variant = item.variant || "factual";
+              const variantText = article.processed_variants?.[variant] || "";
+              placedItems.push({
+                articleId: item.articleId,
+                variant: variant,
+                isAd: false,
+                adId: null,
+                headline: article.original_title,
+                body: variantText,
+              });
+            }
+          } else {
+            const ad = ads.find(a => a.id === item.adId);
+            if (ad) {
+              placedItems.push({
+                articleId: null,
+                variant: null,
+                isAd: true,
+                adId: item.adId,
+                headline: ad.company,
+                body: ad.description,
+              });
+            }
+          }
         }
       });
 
       // Add row2 items
       zoneState.row2.forEach((item) => {
         if (item) {
-          placedItems.push({
-            articleId: item.type === "article" ? item.articleId : null,
-            variant: item.variant || "factual",
-            isAd: item.type === "ad",
-            adId: item.type === "ad" ? item.adId : null,
-          });
+          if (item.type === "article") {
+            const article = dailyEdition?.articles.find(a => a.id === item.articleId);
+            if (article) {
+              const variant = item.variant || "factual";
+              const variantText = article.processed_variants?.[variant] || "";
+              placedItems.push({
+                articleId: item.articleId,
+                variant: variant,
+                isAd: false,
+                adId: null,
+                headline: article.original_title,
+                body: variantText,
+              });
+            }
+          } else {
+            const ad = ads.find(a => a.id === item.adId);
+            if (ad) {
+              placedItems.push({
+                articleId: null,
+                variant: null,
+                isAd: true,
+                adId: item.adId,
+                headline: ad.company,
+                body: ad.description,
+              });
+            }
+          }
         }
       });
 
       // Add row3 items
       zoneState.row3.forEach((item) => {
         if (item) {
-          placedItems.push({
-            articleId: item.type === "article" ? item.articleId : null,
-            variant: item.variant || "factual",
-            isAd: item.type === "ad",
-            adId: item.type === "ad" ? item.adId : null,
-          });
+          if (item.type === "article") {
+            const article = dailyEdition?.articles.find(a => a.id === item.articleId);
+            if (article) {
+              const variant = item.variant || "factual";
+              const variantText = article.processed_variants?.[variant] || "";
+              placedItems.push({
+                articleId: item.articleId,
+                variant: variant,
+                isAd: false,
+                adId: null,
+                headline: article.original_title,
+                body: variantText,
+              });
+            }
+          } else {
+            const ad = ads.find(a => a.id === item.adId);
+            if (ad) {
+              placedItems.push({
+                articleId: null,
+                variant: null,
+                isAd: true,
+                adId: item.adId,
+                headline: ad.company,
+                body: ad.description,
+              });
+            }
+          }
         }
       });
 
@@ -1272,7 +1370,8 @@ export default function EditorPage() {
           credibility: publishStats.credibility,
           readers: publishStats.readers,
         },
-        placedItems
+        placedItems,
+        newspaperName // Include newspaper name
       );
       
       // Show Morning Report instead of immediate redirect
@@ -1285,9 +1384,16 @@ export default function EditorPage() {
         credibilityEvents: [], // Placeholder for future event messages
         editionId: response.id ?? null,
       });
+      
+      toast.success("Newspaper published successfully!", {
+        duration: 3000,
+      });
     } catch (error) {
       console.error("Failed to publish:", error);
-      alert(`Failed to publish: ${error instanceof Error ? error.message : "Unknown error"}`);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      toast.error(`Failed to publish: ${errorMessage}`, {
+        duration: 5000,
+      });
     } finally {
       setIsPublishing(false);
     }
@@ -1333,14 +1439,23 @@ export default function EditorPage() {
     const activeId = active.id as string;
 
     if (activeId.startsWith("article-")) {
-      const articleId = parseInt(activeId.replace("article-", ""), 10);
+      const articleId = activeId.replace("article-", ""); // Now it's a string, not numeric
       const article = dailyEdition?.articles.find((a) => a.id === articleId);
       if (article) {
         setActiveDragItem(article);
         setActiveDragItemType("article");
+        
+        // Set assistant comment when dragging starts
+        setSelectedArticleId(articleId);
+        if (article.assistant_comment) {
+          setAssistantMessage(article.assistant_comment);
+        } else {
+          // Fallback message
+          setAssistantMessage("This looks like a solid lead.");
+        }
       }
     } else if (activeId.startsWith("ad-")) {
-      const adId = parseInt(activeId.replace("ad-", ""), 10);
+      const adId = activeId.replace("ad-", "");  // Changed from parseInt to string
       const ad = ads.find((a) => a.id === adId);
       if (ad) {
         setActiveDragItem(ad);
@@ -1429,7 +1544,7 @@ export default function EditorPage() {
 
     // Wire to Zone - Articles
     if (activeId.startsWith("article-")) {
-      const articleId = parseInt(activeId.replace("article-", ""), 10);
+      const articleId = activeId.replace("article-", ""); // Changed: now it's a string (PocketBase ID)
       const target = parseZoneId(overId);
 
       setZoneState((prev) => {
@@ -1478,7 +1593,13 @@ export default function EditorPage() {
 
     // Wire to Zone - Ads
     if (activeId.startsWith("ad-")) {
-      const adId = parseInt(activeId.replace("ad-", ""), 10);
+      const adId = activeId.replace("ad-", "");  // Changed from parseInt to string
+      console.log("[handleDrop] Ad dropped:", {
+        activeId,
+        extractedAdId: adId,
+        extractedAdIdType: typeof adId,
+        overId,
+      });
       const target = parseZoneId(overId);
 
       setZoneState((prev) => {
@@ -1702,6 +1823,16 @@ export default function EditorPage() {
   const availableArticles =
     dailyEdition?.articles.filter((article) => !placedArticleIds.has(article.id)) || [];
   const availableAds = ads.filter((ad) => !placedAdIds.has(ad.id));
+  
+  // Debug logging
+  useEffect(() => {
+    console.log(`[EditorPage] Ads state:`, {
+      totalAds: ads.length,
+      availableAds: availableAds.length,
+      placedAdIds: Array.from(placedAdIds),
+      showAds: showAds,
+    });
+  }, [ads, availableAds, placedAdIds, showAds]);
 
   if (loading) {
     return (
@@ -1733,7 +1864,8 @@ export default function EditorPage() {
   }
 
   return (
-    <DndContext
+    <ProtectedRoute>
+      <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
       onDragStart={handleDragStart}
@@ -1750,7 +1882,7 @@ export default function EditorPage() {
             <div className="mb-3">
               <Assistant 
                 mood="neutral" 
-                message="Drag scoops to the newspaper zones on the right."
+                message={assistantMessage || "Drag scoops to the newspaper zones on the right."}
                 viewMode="grid"
               />
             </div>
@@ -1805,8 +1937,21 @@ export default function EditorPage() {
             ) : (
               <Wire
                 articles={availableArticles}
-                selectedArticleId={null}
-                onArticleSelect={() => {}}
+                selectedArticleId={selectedArticleId}
+                onArticleSelect={(articleId: string | number) => {
+                  const articleIdStr = String(articleId);
+                  setSelectedArticleId(articleIdStr);
+                  
+                  // Find the article and set assistant comment
+                  const selectedArticle = availableArticles.find(a => a.id === articleIdStr);
+                  
+                  if (selectedArticle?.assistant_comment) {
+                    setAssistantMessage(selectedArticle.assistant_comment);
+                  } else {
+                    // Fallback message
+                    setAssistantMessage("This looks like a solid lead.");
+                  }
+                }}
                 viewMode="grid"
                 showHeader={false}
               />
@@ -1831,7 +1976,32 @@ export default function EditorPage() {
           className="h-full flex overflow-hidden flex-shrink-0"
           style={{ width: `${100 - splitterPosition}%` }}
         >
-          <div className="h-full overflow-y-auto bg-[#2a1810] flex-1">
+          <div className="h-full overflow-y-auto bg-[#2a1810] flex-1 relative">
+            {/* Floating Publish Button - Top Right */}
+            {hasPlacedItems && (
+              <button
+                onClick={handlePublish}
+                disabled={isPublishing}
+                className={`fixed top-4 right-20 z-50 px-6 py-3 rounded-lg transition-all flex items-center gap-2 shadow-lg ${
+                  isPublishing
+                    ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
+                    : "bg-[#d4af37] text-[#1a0f08] hover:bg-[#e5c04a] hover:shadow-xl"
+                }`}
+                title="Publish Edition"
+              >
+                {isPublishing ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span className="font-serif font-bold">Publishing...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xl">📰</span>
+                    <span className="font-serif font-bold">Publish</span>
+                  </>
+                )}
+              </button>
+            )}
             <div className="transform scale-[0.95] origin-top">
               <InteractiveNewspaper
                 zoneState={zoneState}
@@ -1846,23 +2016,26 @@ export default function EditorPage() {
 
           {/* Vertical Toolbar - Right Side */}
           <div className="w-16 bg-[#1a0f08] border-l border-[#8b6f47] flex flex-col items-center gap-4 py-4 paper-texture flex-shrink-0">
-          <button
-            onClick={handleRefreshScoops}
-            disabled={isRefreshing}
-            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              isRefreshing
-                ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
-                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-            }`}
-            title="Fetch new scoops"
-          >
-            {isRefreshing ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <RefreshCw className="w-5 h-5" />
-            )}
-            <span className="text-[10px]">{isRefreshing ? "..." : "Fetch"}</span>
-          </button>
+          {/* Only show refresh button for admin */}
+          {isAdmin && (
+            <button
+              onClick={handleRefreshScoops}
+              disabled={isRefreshing}
+              className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+                isRefreshing
+                  ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
+                  : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+              }`}
+              title="Fetch new scoops"
+            >
+              {isRefreshing ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-5 h-5" />
+              )}
+              <span className="text-[10px]">{isRefreshing ? "..." : "Fetch"}</span>
+            </button>
+          )}
           <button
             onClick={() => router.push('/hub')}
             className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
@@ -1892,29 +2065,36 @@ export default function EditorPage() {
             <span className="text-[10px]">Grid</span>
           </button>
           <button
+            onClick={() => router.push("/archives")}
+            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+              pathname === "/archives"
+                ? "bg-[#d4af37] text-[#1a0f08]"
+                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+            }`}
+            title="Archives"
+          >
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[10px]">Archives</span>
+          </button>
+          <button
+            onClick={() => router.push("/leaderboard")}
+            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+              pathname === "/leaderboard"
+                ? "bg-[#d4af37] text-[#1a0f08]"
+                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+            }`}
+            title="Leaderboard"
+          >
+            <Trophy className="w-5 h-5" />
+            <span className="text-[10px]">Top 5</span>
+          </button>
+          <button
             onClick={() => setIsShopOpen(true)}
             className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"
             title="Shop"
           >
             <ShoppingBag className="w-5 h-5" />
             <span className="text-[10px]">Shop</span>
-          </button>
-          <button
-            onClick={handlePublish}
-            disabled={isPublishing}
-            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              isPublishing
-                ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
-                : "bg-[#d4af37] text-[#1a0f08] hover:bg-[#e5c04a]"
-            }`}
-            title="Publish Edition"
-          >
-            {isPublishing ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <span className="text-lg">📰</span>
-            )}
-            <span className="text-[10px]">{isPublishing ? "..." : "Publish"}</span>
           </button>
         </div>
         </div>
@@ -1974,6 +2154,7 @@ export default function EditorPage() {
           />
         </div>
       )}
-    </DndContext>
+      </DndContext>
+    </ProtectedRoute>
   );
 }

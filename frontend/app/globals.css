@@ -229,3 +229,11 @@ body {
     );
   background-color: #f4f1ea;
 }
+
+/* Make choropleth map popups transparent to mouse events to prevent hover flickering */
+.no-pointer-events-popup,
+.no-pointer-events-popup .leaflet-popup-content-wrapper,
+.no-pointer-events-popup .leaflet-popup-tip,
+.no-pointer-events-popup .leaflet-popup-content {
+  pointer-events: none !important;
+}

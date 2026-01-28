@@ -1,0 +1,22 @@
+# Environment variables
+.env
+
+# PocketBase data
+pb_data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+

@@ -20,6 +20,8 @@ import GameLayout from "@/components/GameLayout";
 import Assistant from "@/components/Assistant";
 import { Loader2, AlertCircle } from "lucide-react";
 import ShopModal from "@/components/ShopModal";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import toast from "react-hot-toast";
 
 // Dynamically import Map to avoid SSR issues with Leaflet
 const Map = dynamic(() => import("@/components/Map"), {
@@ -36,7 +38,8 @@ type ViewMode = "map" | "grid";
 export default function Home() {
   const router = useRouter();
   const [dailyEdition, setDailyEdition] = useState<DailyEdition | null>(null);
-  const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null);
+  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  const [assistantMessage, setAssistantMessage] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
@@ -88,34 +91,74 @@ export default function Home() {
   );
 
   useEffect(() => {
+    let isMounted = true; // Track if component is still mounted
+    
     async function loadArticles() {
       try {
         setLoading(true);
         setError(null);
         const edition = await fetchLatestArticles();
-        setDailyEdition(edition);
-        // Do NOT auto-select - user must explicitly click to select
+        
+        // Only update state if component is still mounted
+        if (isMounted) {
+          setDailyEdition(edition);
+          // Do NOT auto-select - user must explicitly click to select
+        }
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Failed to load articles";
-        setError(errorMessage);
-        console.error("Error loading articles:", err);
-        // Log more details for debugging
-        if (err instanceof Error) {
-          console.error("Error details:", {
-            message: err.message,
-            stack: err.stack,
-          });
+        // Ignore auto-cancellation errors (they're handled in fetchLatestArticles)
+        const isAutoCancelled = 
+          err instanceof Error && (
+            err.message.includes("autocancelled") ||
+            err.message.includes("auto-cancellation")
+          );
+        
+        if (!isAutoCancelled && isMounted) {
+          const errorMessage = err instanceof Error ? err.message : "Failed to load articles";
+          setError(errorMessage);
+          console.error("Error loading articles:", err);
+          // Log more details for debugging
+          if (err instanceof Error) {
+            console.error("Error details:", {
+              message: err.message,
+              stack: err.stack,
+            });
+          }
         }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     }
 
     loadArticles();
+    
+    // Cleanup: mark component as unmounted
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const handleArticleSelect = (articleId: number) => {
-    setSelectedArticleId(articleId);
+  const handleArticleSelect = (articleId: string | number) => {
+    const articleIdStr = String(articleId);
+    setSelectedArticleId(articleIdStr);
+    
+    // Find the article and set assistant comment
+    const allArticles = dailyEdition?.articles || [];
+    const selectedArticle = allArticles.find(a => a.id === articleIdStr);
+    
+    console.log("[handleArticleSelect] Selected article:", selectedArticle);
+    console.log("[handleArticleSelect] Article ID:", articleIdStr);
+    console.log("[handleArticleSelect] All articles:", allArticles.map(a => ({ id: a.id, hasComment: !!a.assistant_comment })));
+    
+    if (selectedArticle?.assistant_comment) {
+      console.log("[handleArticleSelect] Using assistant comment:", selectedArticle.assistant_comment);
+      setAssistantMessage(selectedArticle.assistant_comment);
+    } else {
+      // Fallback message
+      console.log("[handleArticleSelect] No assistant comment found, using fallback");
+      setAssistantMessage("This looks like a solid lead.");
+    }
   };
 
   const reloadLatest = async () => {
@@ -147,6 +190,7 @@ export default function Home() {
       await reloadLatest();
       
       setRefreshProgress("Complete!");
+      toast.success("New scoops loaded successfully!", { duration: 3000 });
       // Clear progress message after a short delay
       setTimeout(() => {
         setRefreshProgress("");
@@ -156,6 +200,7 @@ export default function Home() {
       setRefreshError(msg);
       setRefreshProgress("");
       console.error("Failed to refresh scoops:", e);
+      toast.error(`Failed to refresh scoops: ${msg}`, { duration: 5000 });
     } finally {
       setIsRefreshing(false);
     }
@@ -222,19 +267,20 @@ export default function Home() {
   const availableArticles = dailyEdition?.articles || [];
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="h-screen flex overflow-hidden bg-[#2a1810]">
+    <ProtectedRoute>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="h-screen flex overflow-hidden bg-[#2a1810]">
         {/* Left Panel - The Wire */}
         <div className="h-full flex flex-col bg-[#1a0f08] border-r-2 border-[#8b6f47] paper-texture overflow-hidden flex-shrink-0 w-80">
           {/* Header with Assistant */}
           <div className="bg-[#2a1810] border-b border-[#8b6f47] p-4 flex-shrink-0">
             <div className="mb-3">
-              <Assistant mood="neutral" viewMode="map" />
+              <Assistant mood="neutral" viewMode="map" message={assistantMessage} />
             </div>
             {refreshError && (
               <p className="text-xs text-red-400 mb-2">{refreshError}</p>
@@ -339,7 +385,8 @@ export default function Home() {
 
       {/* Shop Modal */}
       <ShopModal isOpen={isShopOpen} onClose={() => setIsShopOpen(false)} />
-    </DndContext>
+      </DndContext>
+    </ProtectedRoute>
   );
 }
 

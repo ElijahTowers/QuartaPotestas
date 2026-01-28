@@ -284,12 +284,14 @@ Primary country/region:"""
             model: Ollama model name (defaults to DEFAULT_MODEL)
             
         Returns:
-            Dictionary with processed_variants, tags, sentiment, location_city
+            Dictionary with processed_variants, tags, sentiment, location_city, country_code
         """
         if model is None:
             model = AIService.DEFAULT_MODEL
         
-        prompt = f"""You are an editor at a satirical newspaper. Given the following news article, create THREE distinct variants of the same story.
+        prompt = f"""You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content.
+
+Given the following news article, create THREE distinct variants of the same story.
 
 CRITICAL REQUIREMENT: You MUST provide ALL THREE variants. The JSON response MUST contain exactly these keys: "factual", "sensationalist", "propaganda". Each variant must be 50-100 words.
 
@@ -301,6 +303,35 @@ Additionally, extract:
 - TOPIC_TAGS: List of topic tags (e.g., ["WAR", "TECH", "ECONOMY", "POLITICS", "CLIMATE", "HEALTH"])
 - SENTIMENT: Overall sentiment (positive/negative/neutral)
 - LOCATION_CITY: The primary city mentioned in the article (or "Unknown" if none)
+- COUNTRY_CODE: The ISO 3166-1 alpha-2 country code (e.g., "US", "NL", "JP", "GB", "GLOBAL", or "XX" if unknown)
+- ASSISTANT_COMMENT: A short, cynical QUESTION (1 sentence, max 15 words) from your perspective as a profit-driven editor. You MUST read and understand the specific article content. Ask a relevant question that references specific details, people, places, or events mentioned in the article. The question should be cynical and focused on circulation/impact, NOT generic. Focus on: What angle will sell, who will be affected, what's the real story behind this, or what's the political/economic fallout. NEVER provide moral lessons, ethical guidance, or lectures on societal values. NEVER mention 'journalistic integrity', 'consent', or 'supporting victims' in a sincere way. Do NOT judge potential choices. Be cynical and focused on circulation.
+- AUDIENCE_SCORES: Analyze how this story will be received by 8 distinct factions. Assign a score from -10 to +10 for EACH faction based on how they would react to this story. A story can be good for one faction (+8) but bad for another (-5). The 8 factions are:
+  * elite: Wealthy, pro-business, anti-tax. They like: tax cuts, deregulation, corporate success, economic growth. They dislike: wealth redistribution, regulation, anti-business sentiment.
+  * working_class: Pro-jobs, anti-automation, wants cheap entertainment. They like: job creation, worker rights, affordable goods, entertainment. They dislike: automation, job loss, expensive necessities, elitism.
+  * patriots: Pro-military/police, anti-foreigner, loyal to the State. They like: military strength, law enforcement, national security, traditional values. They dislike: criticism of military/police, immigration, anti-government sentiment.
+  * syndicate: Criminal underground, wants weak police and chaos. They like: police corruption, chaos, weak law enforcement, opportunities for crime. They dislike: strong police, law and order, crackdowns on crime.
+  * technocrats: Pro-AI/Cyborgs, anti-tradition. They like: technological progress, AI advancement, innovation, efficiency. They dislike: anti-tech sentiment, tradition, luddite movements, regulation of tech.
+  * faithful: Religious/Nature-loving, anti-tech, conservative. They like: religious values, nature conservation, tradition, moral stories. They dislike: tech advancement, secularism, environmental destruction, moral decay.
+  * resistance: Anti-government, pro-truth/freedom. They like: government corruption exposed, truth, freedom, whistleblowing. They dislike: propaganda, government praise, censorship, authoritarianism.
+  * doomers: Paranoid preppers, love bad news and collapse theories. They like: disasters, collapse scenarios, bad news, warnings of doom. They dislike: positive news, optimism, "everything is fine" narratives.
+  
+  Return an object with all 8 keys, each with an integer score from -10 to +10.
+
+CRITICAL: The comment MUST be a QUESTION that references SPECIFIC details from the article (names, places, events, numbers, etc.). Do NOT use generic questions like "Will this sell?" or "What's the angle here?" - make it specific to THIS article.
+
+Examples of GOOD comments (specific questions referencing article details):
+- "How many casualties before this becomes front page?"
+- "Will the CEO's resignation tank their stock price?"
+- "Which politician is going to spin this as a win?"
+- "Can we get photos of the crash site before the cleanup?"
+- "What's the real reason they're pulling out of the deal?"
+
+Examples of BAD comments (DO NOT USE - too generic):
+- "This scandal will sell well in the suburbs."
+- "Blood leads. Print it."
+- "What's the angle here?"
+- "Will this sell papers?"
+- "It is important to respect the victims."
 
 Article Title: {title}
 Article Content: {content}
@@ -312,7 +343,19 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
     "propaganda": "50-100 word propaganda version...",
     "tags": ["TAG1", "TAG2"],
     "sentiment": "positive|negative|neutral",
-    "location_city": "City Name"
+    "location_city": "City Name",
+    "country_code": "XX",
+    "assistant_comment": "One cynical QUESTION (max 15 words) referencing specific article details, focused on profit/circulation/impact",
+    "audience_scores": {{
+        "elite": 0,
+        "working_class": 0,
+        "patriots": 0,
+        "syndicate": 0,
+        "technocrats": 0,
+        "faithful": 0,
+        "resistance": 0,
+        "doomers": 0
+    }}
 }}"""
         
         try:
@@ -321,7 +364,7 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a skilled editor who can rewrite news articles in different styles. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city'. All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must not be empty."
+                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must not be empty. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with all 8 keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each value must be an integer from -10 to +10 representing how that faction would react to this story."
                     },
                     {
                         "role": "user",
@@ -390,6 +433,10 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                     tags_match = re.search(r'"tags"\s*:\s*\[(.*?)\]', result_text, re.DOTALL)
                     sentiment_match = re.search(r'"sentiment"\s*:\s*"([^"]*)"', result_text)
                     location_match = re.search(r'"location_city"\s*:\s*"([^"]*)"', result_text)
+                    country_code_match = re.search(r'"country_code"\s*:\s*"([^"]*)"', result_text)
+                    assistant_comment_match = re.search(r'"assistant_comment"\s*:\s*"([^"]*)"', result_text)
+                    # Try to extract audience_scores object (can be nested JSON)
+                    audience_scores_match = re.search(r'"audience_scores"\s*:\s*(\{[^}]*\})', result_text, re.DOTALL)
                     
                     result = {}
                     if factual_match:
@@ -410,6 +457,10 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                         result["sentiment"] = sentiment_match.group(1)
                     if location_match:
                         result["location_city"] = location_match.group(1)
+                    if country_code_match:
+                        result["country_code"] = country_code_match.group(1)
+                    if assistant_comment_match:
+                        result["assistant_comment"] = assistant_comment_match.group(1)
                 except Exception as e:
                     json_errors.append(f"Regex extraction failed: {e}")
             
@@ -465,6 +516,38 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 if not location_city or location_city == "":
                     location_city = "Unknown"
                 
+                # Validate country code (NEW)
+                country_code = result.get("country_code", "XX")
+                if not country_code or country_code == "":
+                    country_code = "XX"
+                # Ensure it's 2 characters or "GLOBAL"
+                country_code = country_code.upper()
+                if country_code != "GLOBAL" and len(country_code) != 2:
+                    country_code = "XX"
+                
+                # Validate assistant_comment
+                assistant_comment = result.get("assistant_comment", "").strip()
+                if not assistant_comment or assistant_comment == "":
+                    assistant_comment = "This looks like a solid lead."
+                
+                # Validate audience_scores
+                audience_scores = result.get("audience_scores", {})
+                if not isinstance(audience_scores, dict):
+                    audience_scores = {}
+                
+                # Ensure all 8 factions are present with valid scores (-10 to 10)
+                required_factions = ["elite", "working_class", "patriots", "syndicate", "technocrats", "faithful", "resistance", "doomers"]
+                validated_scores = {}
+                for faction in required_factions:
+                    score = audience_scores.get(faction, 0)
+                    try:
+                        score = int(score)
+                        # Clamp to -10 to 10 range
+                        score = max(-10, min(10, score))
+                    except (ValueError, TypeError):
+                        score = 0
+                    validated_scores[faction] = score
+                
                 # Final validation: ensure all three variants are present and non-empty
                 assert "factual" in processed_variants and processed_variants["factual"], "factual variant must exist"
                 assert "sensationalist" in processed_variants and processed_variants["sensationalist"], "sensationalist variant must exist"
@@ -475,6 +558,9 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                     "tags": tags,
                     "sentiment": sentiment,
                     "location_city": location_city,
+                    "country_code": country_code,
+                    "assistant_comment": assistant_comment,
+                    "audience_scores": validated_scores,
                 }
             else:
                 # If all strategies failed, log errors and use fallback
@@ -500,7 +586,103 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 "tags": ["GENERAL"],
                 "sentiment": "neutral",
                 "location_city": "Unknown",
+                "country_code": "XX",
+                "assistant_comment": "This looks like a solid lead.",
+                "audience_scores": {
+                    "elite": 0,
+                    "working_class": 0,
+                    "patriots": 0,
+                    "syndicate": 0,
+                    "technocrats": 0,
+                    "faithful": 0,
+                    "resistance": 0,
+                    "doomers": 0,
+                },
             }
+    
+    @staticmethod
+    def extract_country_code(title: str, content: str, model: str = None) -> str:
+        """
+        Extract the ISO 3166-1 alpha-2 country code from an article using Ollama.
+        
+        Args:
+            title: Article title
+            content: Article content/summary
+            model: Ollama model name (defaults to DEFAULT_MODEL)
+            
+        Returns:
+            ISO 3166-1 alpha-2 country code (e.g., "US", "NL", "JP", "GB") or "XX" if unknown
+        """
+        if model is None:
+            model = AIService.DEFAULT_MODEL
+        
+        prompt = f"""Read the following news article and identify the PRIMARY country mentioned or implied.
+Then provide ONLY the ISO 3166-1 alpha-2 country code for that country.
+
+Examples of country codes:
+- United States = US
+- United Kingdom = GB
+- Netherlands = NL
+- France = FR
+- Japan = JP
+- China = CN
+- Russia = RU
+- Germany = DE
+- India = IN
+- Brazil = BR
+- Canada = CA
+- Australia = AU
+- Greenland = GL
+- Iceland = IS
+
+If the article mentions a nationality (like "American", "British", "Dutch", "French"), return the code for that country.
+If the article is about global/worldwide topics (mentions "global", "worldwide", "world", "international", "everywhere"), return "GLOBAL".
+If no country is clearly mentioned or implied, return "XX".
+
+Return ONLY the two-letter country code (e.g., "US", "NL", "GLOBAL", "XX"), nothing else.
+
+Article Title: {title}
+Article Content: {content}
+
+Country Code:"""
+        
+        try:
+            response = ollama.chat(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a location extraction tool. You identify the primary country in news articles and return its ISO 3166-1 alpha-2 code. Return only the two-letter code (e.g., 'US', 'GB', 'NL', 'GLOBAL', 'XX') or nothing else."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            
+            # Handle different response formats
+            if isinstance(response, dict):
+                result_text = response.get("message", {}).get("content", "")
+                if not result_text:
+                    result_text = response.get("response", "")
+            else:
+                result_text = str(response)
+            
+            # Clean up the result
+            country_code = result_text.strip().upper()
+            # Remove any extra characters
+            country_code = "".join(c for c in country_code if c.isalpha())
+            
+            # Validate: should be 2-6 characters (including "GLOBAL" and "XX")
+            if len(country_code) == 2 or country_code == "GLOBAL":
+                return country_code
+            
+            # If invalid, return "XX"
+            return "XX"
+        except Exception as e:
+            print(f"Error extracting country code with Ollama: {e}")
+            return "XX"
     
     @staticmethod
     def check_ollama_available(model: str = None) -> bool:

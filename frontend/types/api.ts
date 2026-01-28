@@ -2,8 +2,19 @@
  * API types matching the FastAPI backend models
  */
 
+export interface AudienceScores {
+  elite: number;
+  working_class: number;
+  patriots: number;
+  syndicate: number;
+  technocrats: number;
+  faithful: number;
+  resistance: number;
+  doomers: number;
+}
+
 export interface Article {
-  id: number;
+  id: string; // Changed from number to string (PocketBase ID)
   original_title: string;
   processed_variants: {
     factual: string;
@@ -19,6 +30,8 @@ export interface Article {
   location_city: string | null;
   date: string;
   published_at: string | null;
+  assistant_comment?: string; // Short commentary from the editor
+  audience_scores?: AudienceScores; // Faction reaction scores (-10 to +10)
 }
 
 export interface DailyEdition {

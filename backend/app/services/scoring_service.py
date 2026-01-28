@@ -3,7 +3,6 @@ Scoring service for calculating newspaper layout scores.
 Pure Python math, NO LLM.
 """
 from typing import Dict, Any, List
-from app.models.article import Article
 
 
 class ScoringService:
@@ -58,7 +57,7 @@ class ScoringService:
         self,
         article_placements: Dict[str, Dict[str, Any]],
         ad_placements: Dict[str, Dict[str, Any]],
-        articles: List[Article],
+        articles: List[Dict[str, Any]],
         grid: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
@@ -77,7 +76,7 @@ class ScoringService:
         synergy_penalties = 0.0
         
         # Create article lookup
-        article_dict = {a.id: a for a in articles}
+        article_dict = {a.get("id") or a.get("article_id"): a for a in articles}
         
         # Process article placements
         for position_str, placement in article_placements.items():
@@ -157,15 +156,15 @@ class ScoringService:
     def _check_synergy_penalties(
         self,
         position: int,
-        article: Article,
+        article: Dict[str, Any],
         grid: List[Dict[str, Any]],
-        article_dict: Dict[int, Article]
+        article_dict: Dict[int, Dict[str, Any]]
     ) -> float:
         """Check for synergy penalties with adjacent cells."""
         penalty = 0.0
         
         # Get article tags
-        article_tags = article.tags.get("topic_tags", []) if isinstance(article.tags, dict) else []
+        article_tags = article.get("tags", {}).get("topic_tags", []) if isinstance(article.get("tags"), dict) else []
         
         # Check adjacent cells (left, right, top, bottom)
         adjacent_positions = [
@@ -192,7 +191,7 @@ class ScoringService:
                 adj_article_id = cell.get("articleId")
                 if adj_article_id in article_dict:
                     adj_article = article_dict[adj_article_id]
-                    adj_tags = adj_article.tags.get("topic_tags", []) if isinstance(adj_article.tags, dict) else []
+                    adj_tags = adj_article.get("tags", {}).get("topic_tags", []) if isinstance(adj_article.get("tags"), dict) else []
                     
                     # Check for known synergy penalties
                     for article_tag in article_tags:

@@ -1,0 +1,601 @@
+"""
+Authentication API endpoints for PocketBase user authentication
+"""
+from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, EmailStr
+from typing import Optional, Dict, Any
+import os
+import sys
+
+# Add parent directory to path to import lib
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+from lib.auth_service import AuthService
+from app.utils.date_format import format_datetime_dutch, format_date_dutch
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Initialize auth service
+_auth_service: Optional[AuthService] = None
+
+
+def get_auth_service() -> AuthService:
+    """Get or create AuthService instance"""
+    global _auth_service
+    if _auth_service is None:
+        pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+        _auth_service = AuthService(base_url=pocketbase_url)
+    return _auth_service
+
+
+# Security scheme for Bearer token
+security = HTTPBearer()
+
+
+# Request/Response Models
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    password_confirm: str
+
+
+class RegisterResponse(BaseModel):
+    id: str
+    email: str
+    created: Optional[str] = None
+    updated: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    identity: str  # Email or username
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    user: Dict[str, Any]
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
+    password: str
+    password_confirm: str
+
+class DailyEditionCreate(BaseModel):
+    date: str  # YYYY-MM-DD format
+    global_mood: str  # String representation of mood
+
+
+class DailyEditionResponse(BaseModel):
+    id: str
+    date: str
+    global_mood: str
+    user: str
+    created: Optional[str] = None
+    updated: Optional[str] = None
+
+
+# Dependency to get current user from token
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+) -> Dict[str, Any]:
+    """
+    Verify token and return current user info.
+    Decodes the JWT token to extract user ID and other claims.
+    """
+    token = credentials.credentials
+    
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Decode JWT to get user info
+    try:
+        import base64
+        import json
+        
+        # JWT format: header.payload.signature
+        parts = token.split(".")
+        if len(parts) < 2:
+            raise ValueError("Invalid JWT format")
+        
+        # Decode payload (add padding if needed)
+        payload = parts[1]
+        payload += "=" * (4 - len(payload) % 4)  # Add padding
+        decoded = base64.urlsafe_b64decode(payload)
+        token_data = json.loads(decoded)
+        
+        # Extract user ID from token
+        user_id = token_data.get("id") or token_data.get("userId")
+        
+        if not user_id:
+            raise ValueError("User ID not found in token")
+        
+        # Try to get email from token first
+        email = token_data.get("email")
+        
+        # Always fetch user record from PocketBase to get email (more reliable)
+        if not email:
+            try:
+                import httpx
+                pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+                
+                # Fetch user record using the token
+                async with httpx.AsyncClient(base_url=pocketbase_url, timeout=5.0) as client:
+                    response = await client.get(
+                        f"/api/collections/users/records/{user_id}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    if response.status_code == 200:
+                        user_record = response.json()
+                        email = user_record.get("email")
+                        print(f"[DEBUG get_current_user] Fetched email from PocketBase: {email}")
+                    else:
+                        print(f"[DEBUG get_current_user] Failed to fetch user: {response.status_code} - {response.text}")
+            except Exception as e:
+                # If fetching fails, continue without email (will fail admin check)
+                print(f"[DEBUG get_current_user] Warning: Could not fetch user email: {e}")
+        
+        print(f"[DEBUG get_current_user] User ID: {user_id}, Email: {email}")
+        
+        return {
+            "token": token,
+            "id": user_id,
+            "email": email,
+            "token_data": token_data,  # Include full token data for debugging
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid or expired token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+# Helper to get auth headers from dependency
+def get_auth_headers(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
+    """Get authentication headers from current user dependency"""
+    token = current_user.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="No token available")
+    return AuthService.get_authenticated_headers(token)
+
+
+@router.post("/register", response_model=RegisterResponse)
+async def register(request: RegisterRequest):
+    """
+    Register a new user account.
+    
+    Returns the created user record.
+    """
+    auth = get_auth_service()
+    
+    try:
+        user = await auth.register(
+            email=request.email,
+            password=request.password,
+            password_confirm=request.password_confirm,
+        )
+        return RegisterResponse(
+            id=user.get("id", ""),
+            email=user.get("email", request.email),
+            created=format_datetime_dutch(user.get("created")),
+            updated=format_datetime_dutch(user.get("updated")),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    """
+    Authenticate a user and get an access token.
+    
+    Returns the JWT token and user record.
+    """
+    auth = get_auth_service()
+    
+    try:
+        token, user_record = await auth.login(
+            identity=request.identity,
+            password=request.password,
+        )
+        return LoginResponse(
+            token=token,
+            user=user_record,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@router.post("/request-password-reset")
+async def request_password_reset(request: PasswordResetRequest):
+    """
+    Request a password reset email.
+
+    Always returns success (even if the email does not exist) to prevent email enumeration.
+    """
+    auth = get_auth_service()
+
+    try:
+        # This method already hides whether the email exists (always returns True)
+        await auth.request_password_reset(request.email)
+        return {"success": True}
+    except Exception as e:
+        # Log server-side, but don't leak info to client
+        print(f"[auth] Password reset request error for {request.email}: {e}")
+        return {"success": True}
+
+
+@router.post("/confirm-password-reset")
+async def confirm_password_reset(request: PasswordResetConfirmRequest):
+    """
+    Confirm password reset with a token and new password.
+    """
+    auth = get_auth_service()
+
+    try:
+        await auth.confirm_password_reset(
+            token=request.token,
+            password=request.password,
+            password_confirm=request.password_confirm,
+        )
+        return {"success": True}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Password reset failed: {str(e)}")
+
+
+@router.post("/daily-editions", response_model=DailyEditionResponse)
+async def create_daily_edition(
+    edition: DailyEditionCreate,
+    headers: Dict[str, str] = Depends(get_auth_headers),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """
+    Create a new daily edition (requires authentication).
+    
+    The edition will be linked to the authenticated user.
+    """
+    import httpx
+    from datetime import date
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    
+    # Get user ID from decoded token (already done in get_current_user)
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Prepare payload with user link
+            payload = {
+                "date": edition.date,
+                "global_mood": edition.global_mood,
+                "user": user_id,  # Link to authenticated user
+            }
+            
+            # Create daily edition
+            response = await client.post(
+                "/api/collections/daily_editions/records",
+                json=payload,
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                edition_data = response.json()
+                return DailyEditionResponse(
+                    id=edition_data.get("id", ""),
+                    date=format_date_dutch(edition_data.get("date", edition.date)),
+                    global_mood=edition_data.get("global_mood", edition.global_mood),
+                    user=edition_data.get("user", user_id),
+                    created=format_datetime_dutch(edition_data.get("created")),
+                    updated=format_datetime_dutch(edition_data.get("updated")),
+                )
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                error_message = error_data.get("message", response.text)
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to create daily edition: {error_message}"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+class NewspaperNameRequest(BaseModel):
+    newspaper_name: str
+
+
+class NewspaperNameResponse(BaseModel):
+    newspaper_name: str
+
+
+@router.get("/newspaper-name", response_model=NewspaperNameResponse)
+async def get_newspaper_name(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Get the current user's newspaper name.
+    Requires authentication.
+    """
+    import httpx
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Get user record
+            response = await client.get(
+                f"/api/collections/users/records/{user_id}",
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                newspaper_name = user_data.get("newspaper_name", "THE DAILY DYSTOPIA")
+                return NewspaperNameResponse(newspaper_name=newspaper_name)
+            else:
+                # If user doesn't have newspaper_name field, return default
+                return NewspaperNameResponse(newspaper_name="THE DAILY DYSTOPIA")
+                
+    except Exception as e:
+        # On error, return default
+        return NewspaperNameResponse(newspaper_name="THE DAILY DYSTOPIA")
+
+
+@router.put("/newspaper-name", response_model=NewspaperNameResponse)
+async def update_newspaper_name(
+    request: NewspaperNameRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Update the current user's newspaper name.
+    Requires authentication.
+    """
+    import httpx
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Update user record with newspaper_name
+            response = await client.patch(
+                f"/api/collections/users/records/{user_id}",
+                json={"newspaper_name": request.newspaper_name},
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                return NewspaperNameResponse(newspaper_name=user_data.get("newspaper_name", request.newspaper_name))
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                error_message = error_data.get("message", response.text)
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to update newspaper name: {error_message}"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+class GameStateResponse(BaseModel):
+    treasury: float
+    purchased_upgrades: list[str]
+    readers: int
+    credibility: float
+
+
+class GameStateUpdateRequest(BaseModel):
+    treasury: Optional[float] = None
+    purchased_upgrades: Optional[list[str]] = None
+    readers: Optional[int] = None
+    credibility: Optional[float] = None
+
+
+@router.get("/game-state", response_model=GameStateResponse)
+async def get_game_state(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Get the current user's game state (treasury, purchased_upgrades, readers, credibility).
+    Requires authentication.
+    """
+    import httpx
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Get user record
+            response = await client.get(
+                f"/api/collections/users/records/{user_id}",
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                treasury = user_data.get("treasury", 0.0) or 0.0
+                purchased_upgrades = user_data.get("purchased_upgrades", []) or []
+                readers = user_data.get("readers", 0) or 0
+                credibility = user_data.get("credibility", 0.0) or 0.0
+                
+                # Handle JSON string if needed
+                if isinstance(purchased_upgrades, str):
+                    try:
+                        import json
+                        purchased_upgrades = json.loads(purchased_upgrades)
+                    except:
+                        purchased_upgrades = []
+                
+                return GameStateResponse(
+                    treasury=float(treasury),
+                    purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
+                    readers=int(readers),
+                    credibility=float(credibility)
+                )
+            else:
+                # Return defaults on error
+                return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0)
+                
+    except Exception as e:
+        # Return defaults on error
+        return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0)
+
+
+@router.put("/game-state", response_model=GameStateResponse)
+async def update_game_state(
+    request: GameStateUpdateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Update the current user's game state (treasury, purchased_upgrades, readers, credibility).
+    Requires authentication.
+    """
+    import httpx
+    import json
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Get current user data first
+            get_response = await client.get(
+                f"/api/collections/users/records/{user_id}",
+                headers=headers,
+            )
+            
+            if get_response.status_code != 200:
+                raise HTTPException(
+                    status_code=get_response.status_code,
+                    detail="Failed to fetch current user data"
+                )
+            
+            user_data = get_response.json()
+            
+            # Prepare update payload (only update provided fields)
+            update_payload = {}
+            if request.treasury is not None:
+                update_payload["treasury"] = request.treasury
+            if request.purchased_upgrades is not None:
+                # Convert list to JSON string for PocketBase
+                update_payload["purchased_upgrades"] = json.dumps(request.purchased_upgrades)
+            if request.readers is not None:
+                update_payload["readers"] = request.readers
+            if request.credibility is not None:
+                update_payload["credibility"] = request.credibility
+            
+            if not update_payload:
+                # No fields to update, return current state
+                treasury = user_data.get("treasury", 0.0) or 0.0
+                purchased_upgrades = user_data.get("purchased_upgrades", []) or []
+                readers = user_data.get("readers", 0) or 0
+                credibility = user_data.get("credibility", 0.0) or 0.0
+                if isinstance(purchased_upgrades, str):
+                    try:
+                        purchased_upgrades = json.loads(purchased_upgrades)
+                    except:
+                        purchased_upgrades = []
+                return GameStateResponse(
+                    treasury=float(treasury),
+                    purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
+                    readers=int(readers),
+                    credibility=float(credibility)
+                )
+            
+            # Update user record
+            response = await client.patch(
+                f"/api/collections/users/records/{user_id}",
+                json=update_payload,
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                updated_data = response.json()
+                treasury = updated_data.get("treasury", 0.0) or 0.0
+                purchased_upgrades = updated_data.get("purchased_upgrades", []) or []
+                readers = updated_data.get("readers", 0) or 0
+                credibility = updated_data.get("credibility", 0.0) or 0.0
+                
+                # Handle JSON string if needed
+                if isinstance(purchased_upgrades, str):
+                    try:
+                        purchased_upgrades = json.loads(purchased_upgrades)
+                    except:
+                        purchased_upgrades = []
+                
+                return GameStateResponse(
+                    treasury=float(treasury),
+                    purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
+                    readers=int(readers),
+                    credibility=float(credibility)
+                )
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                error_message = error_data.get("message", response.text)
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to update game state: {error_message}"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")

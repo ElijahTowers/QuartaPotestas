@@ -4,11 +4,12 @@ import { useState, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import type { Article } from "@/types/api";
 import { Newspaper, MapPin, Tag, Clock, GripVertical } from "lucide-react";
+import { parseDutchDateTime, formatDutchTime } from "@/lib/dateUtils";
 
 interface WireProps {
   articles: Article[];
-  selectedArticleId: number | null;
-  onArticleSelect: (articleId: number) => void;
+  selectedArticleId: string | null;
+  onArticleSelect: (articleId: string | number) => void;
   viewMode: "map" | "grid";
   showHeader?: boolean; // Optional prop to show/hide header
 }
@@ -36,17 +37,13 @@ function DraggableArticleItem({
       }
     : undefined;
 
-  // Click handler - only active in map mode
+  // Click handler - active in both map and grid mode
   const handleClick = (e: React.MouseEvent) => {
-    // Only handle clicks in map mode
-    if (viewMode !== "map") {
-      return;
-    }
     // Don't trigger if we're currently dragging
     if (isDragging) {
       return;
     }
-    // Trigger selection
+    // Trigger selection (works in both map and grid mode)
     e.stopPropagation();
     onSelect();
   };
@@ -85,14 +82,7 @@ function DraggableArticleItem({
         <div className="flex items-center gap-1 text-xs text-[#8b6f47]">
           <Clock className="w-3 h-3" />
           <span>
-            {article.published_at 
-              ? new Date(article.published_at).toLocaleTimeString('en-US', { 
-                  hour: '2-digit', 
-                  minute: '2-digit',
-                  hour12: false
-                })
-              : '--:--'
-            }
+            {formatDutchTime(parseDutchDateTime(article.published_at))}
           </span>
         </div>
         {article.location_city && (

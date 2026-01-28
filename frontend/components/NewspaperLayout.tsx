@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { fetchEdition, fetchLatestArticles, fetchAds, type Article, type Ad } from "@/lib/api";
+import { getPublicPublishedEdition, type PublicPublishedItem } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 
 interface PublishedItem {
-  id: number;
+  id: string;
   type: "article" | "ad";
   headline: string;
   body: string;
@@ -25,7 +25,7 @@ interface NewspaperLayoutProps {
 // Mock data for development
 const mockPublishedItems: PublishedItem[] = [
   {
-    id: 1,
+    id: "1",
     type: "article",
     headline: "BREAKING: World Leaders Gather in Secret Summit",
     body: "In an unprecedented move, world leaders from across the globe convened in an undisclosed location yesterday to discuss the future of international relations. Sources close to the matter suggest that the meeting, which lasted over 12 hours, covered topics ranging from economic policy to climate change mitigation strategies. The secrecy surrounding the event has raised eyebrows among transparency advocates, who question the democratic legitimacy of such closed-door negotiations.",
@@ -33,7 +33,7 @@ const mockPublishedItems: PublishedItem[] = [
     location: "Global",
   },
   {
-    id: 2,
+    id: "2",
     type: "article",
     headline: "Tech Giant Announces Revolutionary AI Breakthrough",
     body: "A major technology corporation has unveiled what it claims to be the most advanced artificial intelligence system ever created. The new system, according to company executives, can process information at speeds previously thought impossible and make decisions with 'human-like intuition.' Critics, however, warn of potential risks and call for increased regulation before widespread deployment.",
@@ -41,14 +41,14 @@ const mockPublishedItems: PublishedItem[] = [
     location: "San Francisco",
   },
   {
-    id: 3,
+    id: "3",
     type: "ad",
     headline: "WarCorp Defense Solutions",
     body: "Protecting freedom, one contract at a time. Premium military-grade equipment for governments and private entities. Terms and conditions apply.",
     source: "WarCorp",
   },
   {
-    id: 4,
+    id: "4",
     type: "article",
     headline: "Climate Summit Ends with Historic Agreement",
     body: "After weeks of intense negotiations, delegates from over 190 countries reached a landmark agreement on carbon emissions. The new framework, which sets ambitious targets for the next decade, has been hailed as a turning point in the fight against climate change. Environmental groups celebrate the progress while acknowledging that implementation will be the true test.",
@@ -56,14 +56,14 @@ const mockPublishedItems: PublishedItem[] = [
     location: "Geneva",
   },
   {
-    id: 5,
+    id: "5",
     type: "ad",
     headline: "PharmaMax - Your Health, Our Priority",
     body: "Trusted by millions worldwide. Revolutionary treatments for modern ailments. Consult your doctor. Side effects may include dependency and existential dread.",
     source: "PharmaMax",
   },
   {
-    id: 6,
+    id: "6",
     type: "article",
     headline: "Local Economy Shows Signs of Recovery",
     body: "Economic indicators suggest that the local economy is beginning to stabilize after months of uncertainty. Unemployment rates have decreased slightly, and consumer confidence is on the rise. Analysts remain cautious, noting that the recovery is fragile and dependent on several external factors.",
@@ -89,6 +89,7 @@ export default function NewspaperLayout({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ cash: number; credibility: number; readers: number } | null>(null);
+  const [paperName, setPaperName] = useState<string>(newspaperName);
 
   // Update publishedItems when prop changes (for real-time editor preview)
   useEffect(() => {
@@ -100,10 +101,8 @@ export default function NewspaperLayout({
   useEffect(() => {
     async function loadEditionData() {
       if (!editionId) {
-        // No ID provided, use prop data or mock data
-        if (propPublishedItems) {
-          setPublishedItems(propPublishedItems);
-        }
+        if (propPublishedItems) setPublishedItems(propPublishedItems);
+        setPaperName(newspaperName);
         return;
       }
 
@@ -111,92 +110,45 @@ export default function NewspaperLayout({
       setError(null);
 
       try {
-        // Fetch edition data
-        const editionData = await fetchEdition(parseInt(editionId, 10));
-        
-        // Fetch articles and ads to get full content
-        const [dailyEdition, adsList] = await Promise.all([
-          fetchLatestArticles(),
-          fetchAds(),
-        ]);
+        const editionData = await getPublicPublishedEdition(editionId);
 
-        // Create article and ad lookup maps
-        const articleMap = new Map<number, Article>();
-        dailyEdition.articles.forEach((article) => {
-          articleMap.set(article.id, article);
-        });
-
-        const adMap = new Map<number, Ad>();
-        adsList.forEach((ad) => {
-          adMap.set(ad.id, ad);
-        });
-
-        // Map placedItems to PublishedItem format, preserving grid order
-        // Filter out empty cells first, then map to PublishedItem
-        const mappedItems: PublishedItem[] = editionData.placedItems
-          .map((item, gridIndex) => {
-            if (item.isAd && item.adId) {
-              const ad = adMap.get(item.adId);
-              if (ad) {
-                return {
-                  id: gridIndex, // Use grid index to preserve order
-                  type: "ad" as const,
-                  headline: ad.company,
-                  body: ad.description,
-                  source: ad.company,
-                };
-              }
-              return null;
-            } else if (item.articleId) {
-              const article = articleMap.get(item.articleId);
-              if (article) {
-                const variant = item.variant || "factual";
-                const variantText = article.processed_variants[variant] || article.processed_variants.factual;
-                
-                // Extract headline (first sentence or first 80 chars)
-                const getHeadline = (text: string, fallback: string): string => {
-                  if (!text) return fallback;
-                  const firstSentenceMatch = text.match(/^[^.!?]+[.!?]/);
-                  if (firstSentenceMatch) {
-                    return firstSentenceMatch[0].trim();
-                  }
-                  if (text.length > 80) {
-                    return text.substring(0, 80).trim() + "...";
-                  }
-                  return text.trim() || fallback;
-                };
-
-                return {
-                  id: gridIndex, // Use grid index to preserve order
-                  type: "article" as const,
-                  headline: getHeadline(variantText, article.original_title),
-                  body: variantText,
-                  variant: variant as "factual" | "sensationalist" | "propaganda",
-                  location: article.location_city || undefined,
-                };
-              }
-              return null;
-            }
-            return null;
+        const mappedItems: PublishedItem[] = (editionData.published_items || []).map(
+          (item: PublicPublishedItem, idx: number) => ({
+            id: `${editionData.id}-${idx}`,
+            type: item.type,
+            headline: item.headline,
+            body: item.body,
+            variant: item.variant,
+            source: item.source,
+            location: item.location,
           })
-          .filter((item): item is PublishedItem => item !== null);
+        );
 
         setPublishedItems(mappedItems);
-        setDate(new Date(editionData.published_at));
-        setEditionNumber(editionData.id);
-        setStats(editionData.stats);
+        setPaperName(editionData.newspaper_name || newspaperName);
+
+        const parsedDate = new Date(editionData.date);
+        setDate(Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate);
+
+        setEditionNumber(propEditionNumber || 42);
+
+        const s: any = editionData.stats || {};
+        setStats({
+          cash: Number(s.cash ?? 0),
+          credibility: Number(s.credibility ?? 0),
+          readers: Number(s.readers ?? 0),
+        });
       } catch (err) {
         console.error("Failed to load edition:", err);
         setError(err instanceof Error ? err.message : "Failed to load edition");
-        // Fall back to mock data on error
-        setPublishedItems(mockPublishedItems);
+        setPublishedItems([]);
       } finally {
         setLoading(false);
       }
     }
 
     loadEditionData();
-  }, [editionId]);
+  }, [editionId, propEditionNumber, propPublishedItems, newspaperName]);
 
   // Map published items into row-based layout (matching editor)
   const row1 = publishedItems.slice(0, 1);
@@ -229,7 +181,7 @@ export default function NewspaperLayout({
         {/* Masthead */}
         <header className="text-center mb-8 border-b-4 border-[#1a1a1a] pb-6 relative z-10">
               <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl font-bold mb-4 tracking-tight break-words px-2 relative z-10" style={{ fontFamily: "var(--font-merriweather), 'Times New Roman', serif" }}>
-                {newspaperName}
+                {paperName}
               </h1>
           <div className="flex justify-between items-center text-sm md:text-base text-[#1a1a1a] border-t-2 border-b-2 border-[#1a1a1a] py-2 mt-4">
             <div className="text-left">
@@ -304,7 +256,7 @@ export default function NewspaperLayout({
         {/* Footer */}
         <footer className="mt-8 pt-4 border-t-2 border-[#1a1a1a] text-center">
           <p className="text-xs text-[#666]">
-            © {new Date().getFullYear()} {newspaperName}. All rights reserved. | 
+            © {new Date().getFullYear()} {paperName}. All rights reserved. | 
             Printed in Dystopia | 
             "The Truth, Sometimes"
           </p>

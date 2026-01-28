@@ -1,6 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from "react";
+import { useAuth } from "./AuthContext";
+import { getNewspaperName, updateNewspaperName, getGameState, updateGameState } from "@/lib/api";
+import toast from "react-hot-toast";
 
 interface GameContextType {
   newspaperName: string;
@@ -9,52 +12,121 @@ interface GameContextType {
   setTreasury: (amount: number | ((prev: number) => number)) => void;
   purchasedUpgrades: string[];
   buyUpgrade: (cost: number, upgradeId: string) => boolean;
+  readers: number;
+  credibility: number;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export function GameProvider({ children }: { children: ReactNode }) {
-  const [newspaperName, setNewspaperName] = useState<string>("THE DAILY DYSTOPIA");
-  const [treasury, setTreasury] = useState<number>(0);
-  const [purchasedUpgrades, setPurchasedUpgrades] = useState<string[]>([]);
-
-  // Load from localStorage on mount
+  const { isAuthenticated } = useAuth();
+  const [newspaperName, setNewspaperNameState] = useState<string>("THE DAILY DYSTOPIA");
+  const [treasury, setTreasuryState] = useState<number>(0);
+  const [purchasedUpgrades, setPurchasedUpgradesState] = useState<string[]>([]);
+  const [readers, setReadersState] = useState<number>(0);
+  const [credibility, setCredibilityState] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  
+  // Load newspaper name and game state from database when user is authenticated
   useEffect(() => {
-    const savedTreasury = localStorage.getItem("game_treasury");
-    const savedUpgrades = localStorage.getItem("game_upgrades");
-    
-    if (savedTreasury) {
-      setTreasury(parseInt(savedTreasury, 10));
+    if (isAuthenticated) {
+      setIsLoading(true);
+      
+      // Load newspaper name
+      getNewspaperName()
+        .then((name) => {
+          setNewspaperNameState(name);
+        })
+        .catch((error) => {
+          console.error("Failed to load newspaper name:", error);
+        });
+      
+      // Load game state
+      getGameState()
+        .then((state) => {
+          setTreasuryState(state.treasury);
+          setPurchasedUpgradesState(state.purchased_upgrades);
+          setReadersState(state.readers);
+          setCredibilityState(state.credibility);
+          setIsLoading(false);
+        })
+        .catch((error) => {
+          console.error("Failed to load game state:", error);
+          setIsLoading(false);
+        });
+    } else {
+      setIsLoading(false);
     }
-    if (savedUpgrades) {
+  }, [isAuthenticated]);
+  
+  // Wrapper function to save to database when newspaper name changes
+  const setNewspaperName = useCallback(async (name: string) => {
+    setNewspaperNameState(name);
+    
+    // Save to database if authenticated
+    if (isAuthenticated) {
       try {
-        setPurchasedUpgrades(JSON.parse(savedUpgrades));
-      } catch (e) {
-        console.error("Failed to parse saved upgrades:", e);
+        await updateNewspaperName(name);
+        toast.success("Newspaper name saved", { duration: 2000 });
+      } catch (error) {
+        console.error("Failed to save newspaper name:", error);
+        toast.error("Failed to save newspaper name", { duration: 3000 });
+        // Continue even if save fails - user can try again
       }
     }
-  }, []);
-
-  // Save to localStorage whenever treasury or upgrades change
+  }, [isAuthenticated]);
+  
+  // Wrapper function to save treasury to database when it changes
+  const setTreasury = useCallback(async (amount: number | ((prev: number) => number)) => {
+    const newAmount = typeof amount === "function" ? amount(treasury) : amount;
+    setTreasuryState(newAmount);
+    
+    // Save to database if authenticated
+    if (isAuthenticated && !isLoading) {
+      try {
+        await updateGameState({ treasury: newAmount });
+      } catch (error) {
+        console.error("Failed to save treasury:", error);
+        // Continue even if save fails - user can try again
+      }
+    }
+  }, [isAuthenticated, treasury, isLoading]);
+  
+  // Save purchased upgrades to database when they change
   useEffect(() => {
-    localStorage.setItem("game_treasury", treasury.toString());
-  }, [treasury]);
+    if (isAuthenticated && !isLoading && purchasedUpgrades.length >= 0) {
+      updateGameState({ purchased_upgrades: purchasedUpgrades })
+        .catch((error) => {
+          console.error("Failed to save purchased upgrades:", error);
+        });
+    }
+  }, [purchasedUpgrades, isAuthenticated, isLoading]);
 
-  useEffect(() => {
-    localStorage.setItem("game_upgrades", JSON.stringify(purchasedUpgrades));
-  }, [purchasedUpgrades]);
-
-  const buyUpgrade = (cost: number, upgradeId: string): boolean => {
+  const buyUpgrade = useCallback((cost: number, upgradeId: string): boolean => {
     if (treasury >= cost) {
-      setTreasury((prev) => prev - cost);
-      setPurchasedUpgrades((prev) => {
-        // Allow stacking (multiple purchases of same upgrade)
-        return [...prev, upgradeId];
-      });
+      const newTreasury = treasury - cost;
+      const newUpgrades = [...purchasedUpgrades, upgradeId];
+      
+      setTreasuryState(newTreasury);
+      setPurchasedUpgradesState(newUpgrades);
+      
+      // Save to database if authenticated
+      if (isAuthenticated && !isLoading) {
+        updateGameState({ 
+          treasury: newTreasury, 
+          purchased_upgrades: newUpgrades 
+        }).then(() => {
+          toast.success("Upgrade purchased!", { duration: 2000 });
+        }).catch((error) => {
+          console.error("Failed to save upgrade purchase:", error);
+          toast.error("Failed to save upgrade purchase", { duration: 3000 });
+        });
+      }
+      
       return true;
     }
     return false;
-  };
+  }, [treasury, purchasedUpgrades, isAuthenticated, isLoading]);
 
   return (
     <GameContext.Provider
@@ -65,6 +137,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         setTreasury,
         purchasedUpgrades,
         buyUpgrade,
+        readers,
+        credibility,
       }}
     >
       {children}

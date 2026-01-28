@@ -1,15 +1,15 @@
 "use client";
 
 import { Suspense, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import NewspaperLayout from "@/components/NewspaperLayout";
-import { useGame } from "@/context/GameContext";
 import { ArrowLeft } from "lucide-react";
 
 function NewspaperPageContent() {
-  const { newspaperName } = useGame();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const containerRef = useRef<HTMLDivElement>(null);
+  const from = searchParams.get("from");
   
   useEffect(() => {
     // Trigger animation after component mounts
@@ -30,11 +30,17 @@ function NewspaperPageContent() {
   
   return (
     <div className="bg-black h-screen overflow-y-auto relative">
-      {/* Back to Grid button */}
+      {/* Back button */}
       <button
-        onClick={() => router.push('/')}
+        onClick={() => {
+          if (from === "leaderboard") {
+            router.push("/leaderboard");
+          } else {
+            router.push("/");
+          }
+        }}
         className="fixed top-4 left-4 z-[1000] bg-[#1a0f08] border border-[#8b6f47] text-[#e8dcc6] px-4 py-2 rounded hover:bg-[#2a1810] hover:border-[#d4af37] transition-colors flex items-center gap-2 shadow-lg paper-texture"
-        title="Back to Grid Editor"
+        title={from === "leaderboard" ? "Back to Leaderboard" : "Back to Map"}
       >
         <ArrowLeft className="w-4 h-4" />
         <span className="text-sm font-serif">Back</span>
@@ -44,7 +50,7 @@ function NewspaperPageContent() {
         ref={containerRef} 
         className="w-full animate-spin-slam"
       >
-        <NewspaperLayout newspaperName={newspaperName} />
+        <NewspaperLayout />
       </div>
     </div>
   );

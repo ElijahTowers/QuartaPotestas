@@ -98,6 +98,12 @@ lerna-debug.log*
 .dockerignore
 docker-compose.override.yml
 
+# Local binaries / large tooling
+backend/pocketbase
+backend/pocketbase.exe
+stable-diffusion-webui/
+Trading_Cards/
+
 # Alembic
 alembic/versions/*.pyc
 

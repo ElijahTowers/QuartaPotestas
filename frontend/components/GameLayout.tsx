@@ -4,8 +4,13 @@ import React from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Assistant from "./Assistant";
 import EditableTitle from "./EditableTitle";
-import { Loader2, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase } from "lucide-react";
+import { Loader2, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, LogOut, BookOpen, Trophy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
+import { useAuth } from "@/context/AuthContext";
+
+// Admin email - only this user can fetch new scoops
+const ADMIN_EMAIL = "lowiehartjes@gmail.com";
+import { parseDutchDateTime, formatDutchDate } from "@/lib/dateUtils";
 
 type ViewMode = "map" | "grid";
 
@@ -41,8 +46,24 @@ export default function GameLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { newspaperName, setNewspaperName } = useGame();
+  const { logout, user } = useAuth();
 
   const displaySubtitle = subtitle || (viewMode === "map" ? "The War Room" : "Front Page Editor");
+
+  // Route-based active states (prevents multiple tabs highlighting on non-map pages like /leaderboard)
+  const isHubActive = pathname === "/hub";
+  const isMapActive = pathname === "/";
+  const isGridActive = pathname === "/editor";
+  const isArchivesActive = pathname === "/archives";
+  const isLeaderboardActive = pathname === "/leaderboard";
+  
+  // Check if current user is admin
+  const isAdmin = user?.email === ADMIN_EMAIL;
+
+  const handleLogout = async () => {
+    await logout();
+    router.push("/login");
+  };
 
   return (
     <div className="flex-1 relative flex flex-col h-screen overflow-hidden">
@@ -59,7 +80,7 @@ export default function GameLayout({
               <p className="text-sm text-[#8b6f47] mt-1">{displaySubtitle}</p>
               {editionInfo && (
                 <p className="text-sm text-[#8b6f47] mt-1">
-                  Edition: {new Date(editionInfo.date).toLocaleDateString()} •{" "}
+                  Edition: {formatDutchDate(parseDutchDateTime(editionInfo.date))} •{" "}
                   {editionInfo.articleCount} scoop{editionInfo.articleCount !== 1 ? "s" : ""} • Mood:{" "}
                   {editionInfo.globalMood || "Unknown"}
                 </p>
@@ -90,27 +111,30 @@ export default function GameLayout({
 
         {/* Vertical Toolbar - Right Side */}
         <div className="w-16 bg-[#1a0f08] border-l border-[#8b6f47] flex flex-col items-center gap-4 py-4 paper-texture flex-shrink-0">
-          <button
-            onClick={onRefreshScoops}
-            disabled={isRefreshing}
-            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              isRefreshing
-                ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
-                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-            }`}
-            title="Fetch new scoops"
-          >
-            {isRefreshing ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <RefreshCw className="w-5 h-5" />
-            )}
-            <span className="text-[10px]">{isRefreshing ? "..." : "Fetch"}</span>
-          </button>
+          {/* Only show refresh button for admin */}
+          {isAdmin && (
+            <button
+              onClick={onRefreshScoops}
+              disabled={isRefreshing}
+              className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+                isRefreshing
+                  ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
+                  : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+              }`}
+              title="Fetch new scoops"
+            >
+              {isRefreshing ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-5 h-5" />
+              )}
+              <span className="text-[10px]">{isRefreshing ? "..." : "Fetch"}</span>
+            </button>
+          )}
           <button
             onClick={() => router.push("/hub")}
             className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              pathname === "/hub"
+              isHubActive
                 ? "bg-[#d4af37] text-[#1a0f08]"
                 : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
             }`}
@@ -120,9 +144,15 @@ export default function GameLayout({
             <span className="text-[10px]">Hub</span>
           </button>
           <button
-            onClick={() => onViewModeChange("map")}
+            onClick={() => {
+              if (isMapActive) {
+                onViewModeChange("map");
+              } else {
+                router.push("/");
+              }
+            }}
             className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              viewMode === "map" && pathname !== "/hub"
+              isMapActive
                 ? "bg-[#d4af37] text-[#1a0f08]"
                 : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
             }`}
@@ -132,9 +162,15 @@ export default function GameLayout({
             <span className="text-[10px]">Map</span>
           </button>
           <button
-            onClick={() => onViewModeChange("grid")}
+            onClick={() => {
+              if (isGridActive) {
+                onViewModeChange("grid");
+              } else {
+                router.push("/editor");
+              }
+            }}
             className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              viewMode === "grid" && pathname !== "/hub"
+              isGridActive
                 ? "bg-[#d4af37] text-[#1a0f08]"
                 : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
             }`}
@@ -144,12 +180,45 @@ export default function GameLayout({
             <span className="text-[10px]">Grid</span>
           </button>
           <button
+            onClick={() => router.push("/archives")}
+            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+              isArchivesActive
+                ? "bg-[#d4af37] text-[#1a0f08]"
+                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+            }`}
+            title="Archives"
+          >
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[10px]">Archives</span>
+          </button>
+          <button
+            onClick={() => router.push("/leaderboard")}
+            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+              isLeaderboardActive
+                ? "bg-[#d4af37] text-[#1a0f08]"
+                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+            }`}
+            title="Leaderboard"
+          >
+            <Trophy className="w-5 h-5" />
+            <span className="text-[10px]">Top 5</span>
+          </button>
+          <button
             onClick={onOpenShop}
             className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"
             title="Shop"
           >
             <ShoppingBag className="w-5 h-5" />
             <span className="text-[10px]">Shop</span>
+          </button>
+          <div className="flex-1" /> {/* Spacer */}
+          <button
+            onClick={handleLogout}
+            className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-red-900/30 hover:border-red-700/50 border border-transparent"
+            title="Logout"
+          >
+            <LogOut className="w-5 h-5" />
+            <span className="text-[10px]">Exit</span>
           </button>
         </div>
       </div>

@@ -1,0 +1,17 @@
+{
+  "name": "quarta-potestas",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "dev:network": "cd frontend && npm run dev:network",
+    "build": "cd frontend && npm run build",
+    "start": "cd frontend && npm run start",
+    "start:network": "cd frontend && npm run start:network",
+    "lint": "cd frontend && npm run lint",
+    "broadcast": "cd frontend && npm run broadcast",
+    "broadcast:pb": "cd frontend && npm run broadcast:pb"
+  },
+  "description": "Satirical Newspaper Simulation Game"
+}
+

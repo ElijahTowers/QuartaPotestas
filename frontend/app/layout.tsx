@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Merriweather } from "next/font/google";
 import { GameProvider } from "@/context/GameContext";
+import { AuthProvider } from "@/context/AuthContext";
+import { Toaster } from "react-hot-toast";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,9 +37,35 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${merriweather.variable} antialiased`}
       >
-        <GameProvider>
-        {children}
-        </GameProvider>
+        <AuthProvider>
+          <GameProvider>
+            {children}
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                duration: 4000,
+                style: {
+                  background: "#1a0f08",
+                  color: "#e6d5ac",
+                  border: "1px solid #8b6f47",
+                  fontFamily: "Georgia, serif",
+                },
+                success: {
+                  iconTheme: {
+                    primary: "#4ade80",
+                    secondary: "#1a0f08",
+                  },
+                },
+                error: {
+                  iconTheme: {
+                    primary: "#ef4444",
+                    secondary: "#1a0f08",
+                  },
+                },
+              }}
+            />
+          </GameProvider>
+        </AuthProvider>
       </body>
     </html>
   );
