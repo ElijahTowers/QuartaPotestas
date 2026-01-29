@@ -51,7 +51,23 @@ export default function ArchivesPage() {
           throw new Error("Not authenticated");
         }
 
-        const response = await fetch("http://localhost:8000/api/published-editions", {
+        // Use the proper API URL based on where we're accessing from
+        let apiUrl: string;
+        if (typeof window !== "undefined") {
+          const hostname = window.location.hostname;
+          // Use API proxy for production domain or Cloudflare tunnels
+          if (hostname === "quartapotestas.com" || hostname === "www.quartapotestas.com" || hostname.includes("trycloudflare.com")) {
+            apiUrl = "/api/proxy/published-editions";
+          } else if (hostname === "localhost" || hostname === "127.0.0.1") {
+            apiUrl = "http://localhost:8000/api/published-editions";
+          } else {
+            apiUrl = `http://${hostname}:8000/api/published-editions`;
+          }
+        } else {
+          apiUrl = "http://localhost:8000/api/published-editions";
+        }
+
+        const response = await fetch(apiUrl, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -92,7 +108,7 @@ export default function ArchivesPage() {
   };
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute allowGuest={true}>
       <div className="h-screen flex overflow-hidden bg-[#2a1810]">
         <GameLayout
           viewMode="map"

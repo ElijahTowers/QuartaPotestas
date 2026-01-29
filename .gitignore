@@ -50,6 +50,9 @@ ENV/
 *.sqlite
 *.sqlite3
 
+# PocketBase data (contains user data, should not be in git)
+backend/pb_data/
+
 # Anaconda / Conda (CRITICAL)
 .conda/
 conda-meta/

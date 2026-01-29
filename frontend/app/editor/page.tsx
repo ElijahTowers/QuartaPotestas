@@ -885,6 +885,7 @@ function InteractiveNewspaper({
 export default function EditorPage() {
   const router = useRouter();
   const pathname = usePathname();
+  const { isGuest } = useAuth();
   const [dailyEdition, setDailyEdition] = useState<DailyEdition | null>(null);
   const [ads, setAds] = useState<Ad[]>([]);
   const [loading, setLoading] = useState(true);
@@ -938,10 +939,13 @@ export default function EditorPage() {
       try {
         setLoading(true);
         setError(null);
-        const [edition, adsList] = await Promise.all([fetchLatestArticles(), fetchAds()]);
+        const [edition, adsList] = await Promise.all([
+          fetchLatestArticles(), 
+          fetchAds().catch(() => []) // Return empty array if ads fetch fails (e.g., for guests)
+        ]);
         setDailyEdition(edition);
-        setAds(adsList);
-        console.log(`[EditorPage] Loaded ${adsList.length} ads`);
+        setAds(adsList || []);
+        console.log(`[EditorPage] Loaded ${adsList?.length || 0} ads`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to load data";
         setError(errorMessage);
@@ -957,12 +961,21 @@ export default function EditorPage() {
   }, []);
 
   const reloadLatest = async () => {
-    const [edition, adsList] = await Promise.all([fetchLatestArticles(), fetchAds()]);
+    const [edition, adsList] = await Promise.all([
+      fetchLatestArticles(), 
+      fetchAds().catch(() => []) // Return empty array if ads fetch fails (e.g., for guests)
+    ]);
     setDailyEdition(edition);
-    setAds(adsList);
+    setAds(adsList || []);
   };
 
   const handleRefreshScoops = async () => {
+    // Block refresh for guest users
+    if (isGuest) {
+      toast.error("Please log in to refresh scoops", { duration: 3000 });
+      return;
+    }
+    
     try {
       setIsRefreshing(true);
       setRefreshError(null);
@@ -1248,6 +1261,15 @@ export default function EditorPage() {
   };
 
   const handlePublish = async () => {
+    // Block publishing for guest users
+    if (isGuest) {
+      toast.error("Please log in to publish your newspaper", { 
+        duration: 4000,
+      });
+      router.push("/login");
+      return;
+    }
+    
     try {
       setIsPublishing(true);
       
@@ -1864,7 +1886,7 @@ export default function EditorPage() {
   }
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute allowGuest={true}>
       <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
@@ -1981,18 +2003,23 @@ export default function EditorPage() {
             {hasPlacedItems && (
               <button
                 onClick={handlePublish}
-                disabled={isPublishing}
+                disabled={isPublishing || isGuest}
                 className={`fixed top-4 right-20 z-50 px-6 py-3 rounded-lg transition-all flex items-center gap-2 shadow-lg ${
-                  isPublishing
+                  isPublishing || isGuest
                     ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
                     : "bg-[#d4af37] text-[#1a0f08] hover:bg-[#e5c04a] hover:shadow-xl"
                 }`}
-                title="Publish Edition"
+                title={isGuest ? "Login required to publish" : "Publish Edition"}
               >
                 {isPublishing ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
                     <span className="font-serif font-bold">Publishing...</span>
+                  </>
+                ) : isGuest ? (
+                  <>
+                    <span className="text-xl">🔒</span>
+                    <span className="font-serif font-bold">Login to Publish</span>
                   </>
                 ) : (
                   <>
@@ -2020,7 +2047,7 @@ export default function EditorPage() {
           {isAdmin && (
             <button
               onClick={handleRefreshScoops}
-              disabled={isRefreshing}
+              disabled={isRefreshing || isGuest}
               className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
                 isRefreshing
                   ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"

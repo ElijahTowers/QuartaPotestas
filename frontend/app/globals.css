@@ -237,3 +237,15 @@ body {
 .no-pointer-events-popup .leaflet-popup-content {
   pointer-events: none !important;
 }
+
+/* Hide Next.js development overlay unless admin is logged in */
+/* This will be controlled by DevOverlayController component */
+body:not(.admin-user) [data-nextjs-dialog],
+body:not(.admin-user) [data-nextjs-toast],
+body:not(.admin-user) div[class*="__next-dev-overlay"],
+body:not(.admin-user) div[class*="next-dev"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

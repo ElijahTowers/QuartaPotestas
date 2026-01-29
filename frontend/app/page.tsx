@@ -21,6 +21,7 @@ import Assistant from "@/components/Assistant";
 import { Loader2, AlertCircle } from "lucide-react";
 import ShopModal from "@/components/ShopModal";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import { useAuth } from "@/context/AuthContext";
 import toast from "react-hot-toast";
 
 // Dynamically import Map to avoid SSR issues with Leaflet
@@ -37,6 +38,7 @@ type ViewMode = "map" | "grid";
 
 export default function Home() {
   const router = useRouter();
+  const { isGuest } = useAuth();
   const [dailyEdition, setDailyEdition] = useState<DailyEdition | null>(null);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [assistantMessage, setAssistantMessage] = useState<string | undefined>(undefined);
@@ -115,14 +117,16 @@ export default function Home() {
         if (!isAutoCancelled && isMounted) {
           const errorMessage = err instanceof Error ? err.message : "Failed to load articles";
           setError(errorMessage);
-          console.error("Error loading articles:", err);
+          console.error("[Home] Error loading articles:", err);
           // Log more details for debugging
           if (err instanceof Error) {
-            console.error("Error details:", {
+            console.error("[Home] Error details:", {
               message: err.message,
               stack: err.stack,
             });
           }
+        } else if (isAutoCancelled) {
+          console.log("[Home] Auto-cancellation detected, ignoring error");
         }
       } finally {
         if (isMounted) {
@@ -169,6 +173,12 @@ export default function Home() {
   };
 
   const handleRefreshScoops = async () => {
+    // Block refresh for guest users
+    if (isGuest) {
+      toast.error("Please log in to refresh scoops", { duration: 3000 });
+      return;
+    }
+    
     try {
       setIsRefreshing(true);
       setRefreshError(null);
@@ -267,7 +277,7 @@ export default function Home() {
   const availableArticles = dailyEdition?.articles || [];
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute allowGuest={true}>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

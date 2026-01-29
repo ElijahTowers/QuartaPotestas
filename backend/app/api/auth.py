@@ -332,6 +332,14 @@ class NewspaperNameResponse(BaseModel):
     newspaper_name: str
 
 
+class UsernameRequest(BaseModel):
+    username: str
+
+
+class UsernameResponse(BaseModel):
+    username: str
+
+
 @router.get("/newspaper-name", response_model=NewspaperNameResponse)
 async def get_newspaper_name(
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -382,6 +390,129 @@ async def update_newspaper_name(
     """
     Update the current user's newspaper name.
     Requires authentication.
+    Enforces unique newspaper names across all users.
+    """
+    import httpx
+    from urllib.parse import quote
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    # Sanitize input: trim whitespace and convert to uppercase
+    new_name = request.newspaper_name.strip().upper()
+    
+    if not new_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Newspaper name cannot be empty"
+        )
+    
+    if len(new_name) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Newspaper name cannot exceed 50 characters"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Check for uniqueness: search for any OTHER user with this newspaper_name
+            # We need to use admin auth to check other users' records
+            # First, authenticate as admin
+            admin_email = os.getenv("POCKETBASE_ADMIN_EMAIL", "admin@example.com")
+            admin_password = os.getenv("POCKETBASE_ADMIN_PASSWORD", "admin")
+            
+            admin_auth_response = await client.post(
+                "/api/collections/_superusers/auth-with-password",
+                json={"identity": admin_email, "password": admin_password},
+            )
+            
+            if admin_auth_response.status_code != 200:
+                # If admin auth fails, fall back to user token (may have limited access)
+                admin_headers = headers
+            else:
+                admin_token = admin_auth_response.json()["token"]
+                admin_headers = {
+                    "Authorization": f"Bearer {admin_token}",
+                    "Content-Type": "application/json"
+                }
+            
+            # URL-encode the filter to handle special characters
+            filter_query = f'newspaper_name = "{new_name}" && id != "{user_id}"'
+            encoded_filter = quote(filter_query)
+            
+            check_response = await client.get(
+                f"/api/collections/users/records?filter={encoded_filter}&perPage=1",
+                headers=admin_headers,
+            )
+            
+            if check_response.status_code == 200:
+                check_data = check_response.json()
+                existing_users = check_data.get("items", [])
+                
+                if len(existing_users) > 0:
+                    # Another user already has this name
+                    raise HTTPException(
+                        status_code=409,  # Conflict
+                        detail="This newspaper name is already taken by another editor. Please choose a different name."
+                    )
+            elif check_response.status_code == 403:
+                # Permission denied - user token doesn't have access to read other users
+                # This is expected, so we'll use admin auth for the check
+                # If admin auth also failed above, we need to be more strict
+                error_text = check_response.text[:200] if check_response.text else "Permission denied"
+                print(f"[WARNING] Uniqueness check permission denied: {error_text}")
+                # Don't proceed if we can't verify uniqueness
+                raise HTTPException(
+                    status_code=500,
+                    detail="Unable to verify newspaper name uniqueness. Please try again or contact support."
+                )
+            else:
+                # Other error - log and fail safely
+                error_text = check_response.text[:200] if check_response.text else "Unknown error"
+                print(f"[ERROR] Uniqueness check failed (status {check_response.status_code}): {error_text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to verify newspaper name uniqueness. Please try again."
+                )
+            
+            # No duplicate found, proceed with update
+            response = await client.patch(
+                f"/api/collections/users/records/{user_id}",
+                json={"newspaper_name": new_name},
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                return NewspaperNameResponse(newspaper_name=user_data.get("newspaper_name", new_name))
+            else:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                error_message = error_data.get("message", response.text)
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to update newspaper name: {error_message}"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+@router.get("/username", response_model=UsernameResponse)
+async def get_username(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Get the current user's username.
+    Requires authentication.
     """
     import httpx
     
@@ -396,22 +527,168 @@ async def update_newspaper_name(
     
     try:
         async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
-            # Update user record with newspaper_name
-            response = await client.patch(
+            # Get user record
+            response = await client.get(
                 f"/api/collections/users/records/{user_id}",
-                json={"newspaper_name": request.newspaper_name},
                 headers=headers,
             )
             
             if response.status_code == 200:
                 user_data = response.json()
-                return NewspaperNameResponse(newspaper_name=user_data.get("newspaper_name", request.newspaper_name))
+                username = user_data.get("username", "")
+                return UsernameResponse(username=username)
+            else:
+                # If user doesn't have username field, return empty
+                return UsernameResponse(username="")
+                
+    except Exception as e:
+        # On error, return empty
+        return UsernameResponse(username="")
+
+
+@router.put("/username", response_model=UsernameResponse)
+async def update_username(
+    request: UsernameRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Update the current user's username.
+    Requires authentication.
+    Enforces unique usernames across all users (case-insensitive).
+    """
+    import httpx
+    from urllib.parse import quote
+    
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    user_id = current_user.get("id")
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="User ID not found in token"
+        )
+    
+    # Sanitize input: trim whitespace
+    new_username = request.username.strip()
+    
+    # Validate username
+    if not new_username:
+        raise HTTPException(
+            status_code=400,
+            detail="Username cannot be empty"
+        )
+    
+    if len(new_username) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be at least 3 characters"
+        )
+    
+    if len(new_username) > 30:
+        raise HTTPException(
+            status_code=400,
+            detail="Username cannot exceed 30 characters"
+        )
+    
+    # Only allow alphanumeric and underscores
+    if not all(c.isalnum() or c == '_' for c in new_username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username can only contain letters, numbers, and underscores"
+        )
+    
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+            # Check for uniqueness: search for any OTHER user with this username (case-insensitive)
+            # We need to use admin auth to check other users' records
+            admin_email = os.getenv("POCKETBASE_ADMIN_EMAIL", "admin@example.com")
+            admin_password = os.getenv("POCKETBASE_ADMIN_PASSWORD", "admin")
+            
+            admin_auth_response = await client.post(
+                "/api/collections/_superusers/auth-with-password",
+                json={"identity": admin_email, "password": admin_password},
+            )
+            
+            if admin_auth_response.status_code != 200:
+                # If admin auth fails, fall back to user token (may have limited access)
+                admin_headers = headers
+            else:
+                admin_token = admin_auth_response.json()["token"]
+                admin_headers = {
+                    "Authorization": f"Bearer {admin_token}",
+                    "Content-Type": "application/json"
+                }
+            
+            # Check for duplicates (case-insensitive)
+            # PocketBase doesn't have case-insensitive filter, so we'll fetch all and check in Python
+            all_users_response = await client.get(
+                "/api/collections/users/records?perPage=500",
+                headers=admin_headers,
+            )
+            
+            if all_users_response.status_code == 200:
+                all_users = all_users_response.json().get("items", [])
+                # Check if any other user has this username (case-insensitive)
+                for user in all_users:
+                    if user.get("id") != user_id:
+                        existing_username = user.get("username", "").strip()
+                        if existing_username.lower() == new_username.lower():
+                            raise HTTPException(
+                                status_code=409,  # Conflict
+                                detail="This username is already taken. Please choose a different username."
+                            )
+            elif all_users_response.status_code == 403:
+                # Permission denied - try with filter query instead
+                # Use a filter that checks for exact match (case-sensitive as fallback)
+                filter_query = f'username = "{new_username}" && id != "{user_id}"'
+                encoded_filter = quote(filter_query)
+                
+                check_response = await client.get(
+                    f"/api/collections/users/records?filter={encoded_filter}&perPage=1",
+                    headers=admin_headers,
+                )
+                
+                if check_response.status_code == 200:
+                    check_data = check_response.json()
+                    existing_users = check_data.get("items", [])
+                    
+                    if len(existing_users) > 0:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="This username is already taken. Please choose a different username."
+                        )
+                else:
+                    # If check fails, don't proceed
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Unable to verify username uniqueness. Please try again or contact support."
+                    )
+            else:
+                # Other error - log and fail safely
+                error_text = all_users_response.text[:200] if all_users_response.text else "Unknown error"
+                print(f"[ERROR] Username uniqueness check failed (status {all_users_response.status_code}): {error_text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to verify username uniqueness. Please try again."
+                )
+            
+            # No duplicate found, proceed with update
+            response = await client.patch(
+                f"/api/collections/users/records/{user_id}",
+                json={"username": new_username},
+                headers=headers,
+            )
+            
+            if response.status_code == 200:
+                user_data = response.json()
+                return UsernameResponse(username=user_data.get("username", new_username))
             else:
                 error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
                 error_message = error_data.get("message", response.text)
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"Failed to update newspaper name: {error_message}"
+                    detail=f"Failed to update username: {error_message}"
                 )
                 
     except HTTPException:

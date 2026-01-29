@@ -8,7 +8,7 @@ import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, register, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { login, register, isAuthenticated, isLoading: authLoading, enterGuestMode } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,7 +26,7 @@ export default function LoginPage() {
   // Show loading state while checking authentication
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#2a1810] paper-texture">
+      <div className="min-h-screen flex items-center justify-center bg-[#2a1810] paper-texture py-8">
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-[#d4af37] animate-spin mx-auto mb-4" />
           <p className="text-[#e8dcc6] text-lg">Verifying access...</p>
@@ -66,8 +66,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#2a1810] paper-texture">
-      <div className="w-full max-w-md p-8">
+    <div className="fixed inset-0 overflow-y-auto bg-[#2a1810] paper-texture py-8 px-4">
+      <div className="w-full max-w-md mx-auto p-8">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
@@ -224,8 +224,34 @@ export default function LoginPage() {
             </div>
           </form>
 
+          {/* Pre-Alpha Disclaimer */}
+          <div className="mt-6 p-3 bg-orange-900/20 border border-orange-700/50 rounded text-xs text-orange-200">
+            <p className="font-bold mb-1 uppercase tracking-wider">⚠️ Pre-Alpha Build</p>
+            <p className="text-orange-300/80">
+              This site is in active development. Features may be incomplete or unstable. 
+              Data may be reset during updates.
+            </p>
+          </div>
+
+          {/* Browse as Guest Button */}
+          <div className="mt-6 pt-4 border-t border-[#8b6f47]/30">
+            <button
+              type="button"
+              onClick={() => {
+                enterGuestMode();
+                router.push("/");
+              }}
+              className="w-full py-2 bg-[#3a2418] hover:bg-[#4a3020] text-[#e8dcc6] font-serif text-sm rounded transition-colors border border-[#8b6f47]/50 hover:border-[#a68a5a]"
+            >
+              👁️ Browse as Guest (Read-Only)
+            </button>
+            <p className="mt-2 text-xs text-[#8b6f47] text-center font-mono">
+              Explore the game without creating an account
+            </p>
+          </div>
+
           {/* Info Text */}
-          <p className="mt-6 text-xs text-[#8b6f47] text-center font-mono">
+          <p className="mt-4 text-xs text-[#8b6f47] text-center font-mono">
             {isLogin
               ? "Enter your credentials to access the intelligence feed"
               : "Create an account to start intercepting the wire"}

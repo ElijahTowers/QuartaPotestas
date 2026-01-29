@@ -60,7 +60,7 @@ export default function LeaderboardPage() {
   };
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute allowGuest={true}>
       <GameLayout
         viewMode="map"
         onViewModeChange={() => {}}

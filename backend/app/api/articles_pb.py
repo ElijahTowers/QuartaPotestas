@@ -182,6 +182,21 @@ async def get_latest_edition():
     
     print(f"DEBUG: Found {len(articles)} articles for edition {edition_id}")
     
+    # If no articles found with filter, try getting all recent articles as fallback
+    if len(articles) == 0:
+        print(f"DEBUG: No articles found for edition {edition_id}, trying to get all recent articles")
+        all_articles = await pb.get_list(
+            "articles",
+            sort="-published_at",
+            per_page=500,
+        )
+        print(f"DEBUG: Found {len(all_articles)} total articles in database")
+        if len(all_articles) > 0:
+            # Use the most recent articles even if they're not linked to this edition
+            # This helps guests see content even if edition linking is broken
+            articles = all_articles[:50]  # Limit to 50 most recent
+            print(f"DEBUG: Using {len(articles)} most recent articles as fallback")
+    
     # Map PocketBase records to ArticleResponse
     article_responses = []
     for article in articles:

@@ -4,12 +4,14 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
+import ProtectedRoute from "@/components/ProtectedRoute";
 import { getRecentTransactions, Transaction, getAudienceSnapshot } from "@/lib/api";
 import AudienceRadar from "@/components/analytics/AudienceRadar";
 import type { AudienceScores } from "@/types/api";
 import GameLayout from "@/components/GameLayout";
 import ShopModal from "@/components/ShopModal";
-import EditableTitle from "@/components/EditableTitle";
+import UsernameEditor from "@/components/UsernameEditor";
+import NewspaperNameEditor from "@/components/NewspaperNameEditor";
 import { motion } from "framer-motion";
 
 export default function HubPage() {
@@ -65,8 +67,9 @@ export default function HubPage() {
   const status = getCredibilityStatus(credibility);
 
   return (
-    <div className="h-screen flex overflow-hidden bg-[#2a1810]">
-      <GameLayout
+    <ProtectedRoute requireAuth={true}>
+      <div className="h-screen flex overflow-hidden bg-[#2a1810]">
+        <GameLayout
         viewMode="map"
         onViewModeChange={(mode) => {
           if (mode === "map") router.push("/");
@@ -104,12 +107,17 @@ export default function HubPage() {
               <h1 className="text-4xl font-bold text-[#e8dcc6] font-serif mb-2">
                 EXECUTIVE DESK
               </h1>
-              {user && (
-                <p className="text-lg text-[#d4af37] font-serif italic">
-                  {user.name || user.email || "Unknown User"}
-                </p>
-              )}
             </div>
+
+            {/* Username Editor */}
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+              className="max-w-2xl mx-auto mb-8"
+            >
+              <UsernameEditor />
+            </motion.div>
 
             {/* Newspaper Name Editor */}
             <motion.div
@@ -118,34 +126,7 @@ export default function HubPage() {
               transition={{ duration: 0.4 }}
               className="max-w-2xl mx-auto mb-12"
             >
-              <div
-                className="bg-[#f9f6f0] p-6 rounded shadow-2xl border-2 border-[#8b6f47] relative"
-                style={{
-                  boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
-                }}
-              >
-                {/* Aged paper texture */}
-                <div
-                  className="absolute inset-0 opacity-10 pointer-events-none rounded"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.15'/%3E%3C/svg%3E")`,
-                  }}
-                />
-                
-                <div className="relative z-10">
-                  <p className="text-sm text-[#8b6f47] mb-2 font-mono uppercase tracking-wider">
-                    Publication Name
-                  </p>
-                  <EditableTitle
-                    value={newspaperName}
-                    onChange={setNewspaperName}
-                    className="text-3xl font-bold text-[#1a0f08] font-serif w-full"
-                  />
-                  <p className="text-xs text-[#8b6f47] mt-2 italic">
-                    Click to edit your newspaper's name
-                  </p>
-                </div>
-              </div>
+              <NewspaperNameEditor />
             </motion.div>
 
         {/* Desk Objects Grid */}
@@ -379,7 +360,8 @@ export default function HubPage() {
       
       {/* Shop Modal */}
       <ShopModal isOpen={isShopOpen} onClose={() => setIsShopOpen(false)} />
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
 

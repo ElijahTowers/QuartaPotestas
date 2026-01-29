@@ -17,7 +17,12 @@ function getPocketBaseUrl(): string {
       return "http://127.0.0.1:8090";
     }
 
-    // If accessing via Cloudflare tunnel, use PocketBase tunnel URL from env
+    // If accessing via the production domain, use the db subdomain
+    if (hostname === "quartapotestas.com" || hostname === "www.quartapotestas.com") {
+      return "https://db.quartapotestas.com";
+    }
+
+    // If accessing via old Cloudflare tunnel, use PocketBase tunnel URL from env
     if (hostname.includes("trycloudflare.com")) {
       const pbTunnelUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL;
       if (pbTunnelUrl) {

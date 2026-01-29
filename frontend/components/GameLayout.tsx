@@ -46,7 +46,7 @@ export default function GameLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { newspaperName, setNewspaperName } = useGame();
-  const { logout, user } = useAuth();
+  const { logout, user, isGuest } = useAuth();
 
   const displaySubtitle = subtitle || (viewMode === "map" ? "The War Room" : "Front Page Editor");
 
@@ -132,13 +132,19 @@ export default function GameLayout({
             </button>
           )}
           <button
-            onClick={() => router.push("/hub")}
+            onClick={() => {
+              if (!isGuest) {
+                router.push("/hub");
+              } else {
+                router.push("/login");
+              }
+            }}
             className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
               isHubActive
                 ? "bg-[#d4af37] text-[#1a0f08]"
                 : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-            }`}
-            title="Executive Desk"
+            } ${isGuest ? "opacity-50 cursor-not-allowed" : ""}`}
+            title={isGuest ? "Executive Desk (Login required)" : "Executive Desk"}
           >
             <Briefcase className="w-5 h-5" />
             <span className="text-[10px]">Hub</span>
@@ -179,18 +185,20 @@ export default function GameLayout({
             <LayoutGrid className="w-5 h-5" />
             <span className="text-[10px]">Grid</span>
           </button>
-          <button
-            onClick={() => router.push("/archives")}
-            className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-              isArchivesActive
-                ? "bg-[#d4af37] text-[#1a0f08]"
-                : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-            }`}
-            title="Archives"
-          >
-            <BookOpen className="w-5 h-5" />
-            <span className="text-[10px]">Archives</span>
-          </button>
+          {!isGuest && (
+            <button
+              onClick={() => router.push("/archives")}
+              className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+                isArchivesActive
+                  ? "bg-[#d4af37] text-[#1a0f08]"
+                  : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+              }`}
+              title="Archives"
+            >
+              <BookOpen className="w-5 h-5" />
+              <span className="text-[10px]">Archives</span>
+            </button>
+          )}
           <button
             onClick={() => router.push("/leaderboard")}
             className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
@@ -203,22 +211,43 @@ export default function GameLayout({
             <Trophy className="w-5 h-5" />
             <span className="text-[10px]">Top 5</span>
           </button>
-          <button
-            onClick={onOpenShop}
-            className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"
-            title="Shop"
-          >
-            <ShoppingBag className="w-5 h-5" />
-            <span className="text-[10px]">Shop</span>
-          </button>
+          {!isGuest && (
+            <button
+              onClick={onOpenShop}
+              className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"
+              title="Shop"
+            >
+              <ShoppingBag className="w-5 h-5" />
+              <span className="text-[10px]">Shop</span>
+            </button>
+          )}
           <div className="flex-1" /> {/* Spacer */}
+          
+          {/* Pre-Alpha Badge - Clickable */}
+          <button
+            onClick={() => router.push("/updates")}
+            className="px-2 py-1 mb-2 bg-orange-900/30 border border-orange-700/50 rounded text-center hover:bg-orange-900/50 hover:border-orange-600 transition-colors cursor-pointer"
+            title="View recent updates"
+          >
+            <p className="text-[8px] text-orange-300 font-bold uppercase tracking-wider">Pre-α</p>
+            <p className="text-[7px] text-orange-400/70 mt-0.5">Alpha</p>
+          </button>
+          
+          {/* Guest Mode Indicator */}
+          {isGuest && (
+            <div className="px-2 py-1 mb-2 bg-blue-900/30 border border-blue-700/50 rounded text-center">
+              <p className="text-[8px] text-blue-300 font-bold uppercase tracking-wider">👁️</p>
+              <p className="text-[7px] text-blue-400/70 mt-0.5">Guest</p>
+            </div>
+          )}
+          
           <button
             onClick={handleLogout}
             className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-red-900/30 hover:border-red-700/50 border border-transparent"
-            title="Logout"
+            title={isGuest ? "Exit Guest Mode" : "Logout"}
           >
             <LogOut className="w-5 h-5" />
-            <span className="text-[10px]">Exit</span>
+            <span className="text-[10px]">{isGuest ? "Exit" : "Exit"}</span>
           </button>
         </div>
       </div>

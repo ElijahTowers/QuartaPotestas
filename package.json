@@ -10,7 +10,10 @@
     "start:network": "cd frontend && npm run start:network",
     "lint": "cd frontend && npm run lint",
     "broadcast": "cd frontend && npm run broadcast",
-    "broadcast:pb": "cd frontend && npm run broadcast:pb"
+    "broadcast:pb": "cd frontend && npm run broadcast:pb",
+    "host:public": "cloudflared tunnel --config ops/tunnel/config.yml run quartapotestas-local",
+    "backup": "./ops/backup.sh",
+    "restore": "./ops/restore.sh"
   },
   "description": "Satirical Newspaper Simulation Game"
 }

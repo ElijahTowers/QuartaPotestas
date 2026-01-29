@@ -22,9 +22,9 @@ function getApiBaseUrl(): string {
     if (hostname === "localhost" || hostname === "127.0.0.1") {
       return "http://localhost:8000";
     }
-    // If accessing via Cloudflare tunnel (trycloudflare.com), use Next.js API proxy
+    // If accessing via production domain or Cloudflare tunnel, use Next.js API proxy
     // The proxy route will forward requests to the backend
-    if (hostname.includes("trycloudflare.com")) {
+    if (hostname === "quartapotestas.com" || hostname === "www.quartapotestas.com" || hostname.includes("trycloudflare.com")) {
       // Use Next.js API proxy route
       return ""; // Empty string means relative to current origin, will use /api/proxy
     }
@@ -40,14 +40,19 @@ const API_BASE_URL = getApiBaseUrl();
 
 // Helper to get the actual API URL (with proxy support for Cloudflare tunnels)
 function getActualApiUrl(path: string): string {
-  // Check if we're on Cloudflare tunnel
-  if (typeof window !== "undefined" && window.location.hostname.includes("trycloudflare.com")) {
-    // Use Next.js proxy route
-    // Remove /api/ prefix from path since proxy adds it
-    const cleanPath = path.startsWith("/api/") ? path.substring(4) : (path.startsWith("/") ? path : `/${path}`);
-    return `/api/proxy${cleanPath}`;
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    
+    // Check if we're on the production domain or old Cloudflare tunnel
+    // Use Next.js API proxy route for both
+    if (hostname === "quartapotestas.com" || hostname === "www.quartapotestas.com" || hostname.includes("trycloudflare.com")) {
+      // Use Next.js proxy route
+      // Remove /api/ prefix from path since proxy adds it
+      const cleanPath = path.startsWith("/api/") ? path.substring(4) : (path.startsWith("/") ? path : `/${path}`);
+      return `/api/proxy${cleanPath}`;
+    }
   }
-  // Use direct backend URL
+  // Use direct backend URL for localhost/network access
   return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
@@ -276,6 +281,16 @@ export async function fetchLatestArticles(): Promise<import("@/types/api").Daily
   // Always try to get token from PocketBase first (app uses PocketBase for auth)
   let hasToken = false;
   let token: string | null = null;
+  let isGuest = false;
+  
+  // Check if user is in guest mode
+  try {
+    if (typeof window !== "undefined") {
+      isGuest = localStorage.getItem("guestMode") === "true";
+    }
+  } catch (e) {
+    // Ignore localStorage errors
+  }
   
   try {
     const { getPocketBase } = await import("./pocketbase");
@@ -288,8 +303,10 @@ export async function fetchLatestArticles(): Promise<import("@/types/api").Daily
     hasToken = !!token;
   }
   
-  // If we have a token, try the feed endpoint first
-  if (hasToken) {
+  console.log(`[fetchLatestArticles] Auth state: hasToken=${hasToken}, isGuest=${isGuest}`);
+  
+  // If we have a token and are not a guest, try the feed endpoint first
+  if (hasToken && !isGuest) {
     try {
       return await fetchFeed();
     } catch (error) {
@@ -305,13 +322,64 @@ export async function fetchLatestArticles(): Promise<import("@/types/api").Daily
     }
   }
   
-  // No token - try PocketBase directly (might work without explicit token)
+  // No token - try public API endpoint first (for guests)
+  // The backend endpoint uses admin auth, so it works without user token
+  console.log("[fetchLatestArticles] No user token, trying public API endpoint for guest access");
   try {
-    const { fetchLatestArticles: fetchFromPB } = await import("./pocketbase-api");
-    return fetchFromPB();
-  } catch (pbError) {
-    // If PocketBase fails, require authentication
-    throw new Error("Authentication required. Please log in to view articles.");
+    const response = await fetchWithErrorHandling(getActualApiUrl("/api/articles/latest"));
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`[fetchLatestArticles] Raw response from public endpoint:`, data);
+      console.log(`[fetchLatestArticles] Successfully fetched ${data.articles?.length || 0} articles from public endpoint`);
+      
+      // Map backend response format to frontend format if needed
+      // Backend returns: { id (string), date, global_mood, articles: [...] }
+      // Frontend expects: { id (number), date, global_mood, articles: [...] }
+      // Articles have string IDs, edition has number ID
+      const mappedData = {
+        id: typeof data.id === 'string' ? parseInt(data.id) || 0 : (typeof data.id === 'number' ? data.id : 0),
+        date: data.date || new Date().toISOString().split("T")[0],
+        global_mood: data.global_mood || "neutral",
+        articles: (data.articles || []).map((article: any) => ({
+          id: String(article.id), // Articles always use string IDs
+          original_title: article.original_title || "",
+          processed_variants: article.processed_variants || { factual: "", sensationalist: "", propaganda: "" },
+          tags: article.tags || { topic_tags: [], sentiment: "neutral" },
+          location_lat: article.location_lat ?? null,
+          location_lon: article.location_lon ?? null,
+          location_city: article.location_city ?? null,
+          date: article.date || data.date || new Date().toISOString().split("T")[0],
+          published_at: article.published_at || null,
+          assistant_comment: article.assistant_comment,
+          audience_scores: article.audience_scores,
+        })),
+      };
+      
+      console.log(`[fetchLatestArticles] Mapped data:`, mappedData);
+      return mappedData;
+    } else {
+      const errorText = await response.text().catch(() => response.statusText);
+      console.error(`[fetchLatestArticles] Public endpoint returned ${response.status}:`, errorText);
+      throw new Error(`Public endpoint returned ${response.status}: ${errorText}`);
+    }
+  } catch (publicError) {
+    // If public endpoint fails, try PocketBase directly (might work if collection is public)
+    console.log("[fetchLatestArticles] Public endpoint failed, trying PocketBase directly:", publicError);
+    try {
+      const { fetchLatestArticles: fetchFromPB } = await import("./pocketbase-api");
+      return fetchFromPB();
+    } catch (pbError) {
+      // If both fail, provide a helpful error message
+      console.error("[fetchLatestArticles] Both public endpoint and PocketBase failed:", { publicError, pbError });
+      // For guests, return empty edition instead of throwing error
+      // This allows the UI to load even if articles can't be fetched
+      return {
+        id: 0,
+        date: new Date().toISOString().split("T")[0],
+        global_mood: "neutral",
+        articles: [],
+      };
+    }
   }
 }
 
@@ -359,8 +427,10 @@ export async function fetchAds(): Promise<Ad[]> {
         token = localStorage.getItem("token");
       }
       
+      // For guests (no token), return empty array instead of throwing error
       if (!token) {
-        throw new Error("Authentication required. Please log in to view ads.");
+        console.log("[fetchAds] No authentication token found, returning empty ads array for guest user");
+        return [];
       }
 
       // Fetch ads from FastAPI endpoint (similar to fetchFeed)
@@ -787,7 +857,55 @@ export async function getNewspaperName(): Promise<string> {
 }
 
 /**
+ * Update the current user's username in the database
+ * Enforces unique usernames across all users (case-insensitive).
+ */
+export async function updateUsername(username: string): Promise<void> {
+  try {
+    // Get token from PocketBase auth store
+    const { getPocketBase } = await import("@/lib/pocketbase");
+    const pb = getPocketBase();
+    const token = pb.authStore.token;
+
+    if (!token) {
+      throw new Error("Not authenticated");
+    }
+
+    const url = getActualApiUrl("/api/auth/username");
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({ username: username }),
+      credentials: "omit",
+    });
+
+    if (!response.ok) {
+      // Try to parse JSON error response for detailed message
+      let errorMessage = "Failed to update username";
+      try {
+        const errorData = await response.json();
+        // FastAPI returns errors in "detail" field
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+      } catch {
+        // If JSON parsing fails, use status text
+        errorMessage = `Failed to update username (${response.status})`;
+      }
+      throw new Error(errorMessage);
+    }
+  } catch (error) {
+    console.error("Failed to update username:", error);
+    throw error;
+  }
+}
+
+/**
  * Update the current user's newspaper name in the database
+ * Enforces unique newspaper names across all users.
  */
 export async function updateNewspaperName(newspaperName: string): Promise<void> {
   try {
@@ -812,8 +930,19 @@ export async function updateNewspaperName(newspaperName: string): Promise<void> 
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to update newspaper name (${response.status}): ${errorText}`);
+      // Try to parse JSON error response for detailed message
+      let errorMessage = "Failed to update newspaper name";
+      try {
+        const errorData = await response.json();
+        // FastAPI returns errors in "detail" field
+        if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+      } catch {
+        // If JSON parsing fails, use status text
+        errorMessage = `Failed to update newspaper name (${response.status})`;
+      }
+      throw new Error(errorMessage);
     }
   } catch (error) {
     console.error("Failed to update newspaper name:", error);

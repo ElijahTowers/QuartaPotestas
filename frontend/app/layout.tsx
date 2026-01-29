@@ -4,6 +4,10 @@ import { Merriweather } from "next/font/google";
 import { GameProvider } from "@/context/GameContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { Toaster } from "react-hot-toast";
+import TelemetryTracker from "@/components/analytics/Tracker";
+import PreAlphaBanner from "@/components/PreAlphaBanner";
+import GuestModeBanner from "@/components/GuestModeBanner";
+import DevOverlayController from "@/components/DevOverlayController";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -37,8 +41,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${merriweather.variable} antialiased`}
       >
+        <PreAlphaBanner />
         <AuthProvider>
+          <DevOverlayController />
+          <GuestModeBanner />
           <GameProvider>
+            <TelemetryTracker />
             {children}
             <Toaster
               position="top-right"

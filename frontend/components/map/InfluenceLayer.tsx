@@ -126,11 +126,22 @@ export function InfluenceLayer() {
 
         // Call backend API endpoint instead of direct PocketBase
         // Use the proper backend URL based on where we're accessing from
-        const backendUrl = typeof window !== "undefined" && window.location.hostname === "localhost"
-          ? "http://localhost:8000"
-          : `http://${window.location.hostname}:8000`;
+        let apiUrl: string;
+        if (typeof window !== "undefined") {
+          const hostname = window.location.hostname;
+          // Use API proxy for production domain or Cloudflare tunnels
+          if (hostname === "quartapotestas.com" || hostname === "www.quartapotestas.com" || hostname.includes("trycloudflare.com")) {
+            apiUrl = "/api/proxy/influence";
+          } else if (hostname === "localhost" || hostname === "127.0.0.1") {
+            apiUrl = "http://localhost:8000/api/influence";
+          } else {
+            apiUrl = `http://${hostname}:8000/api/influence`;
+          }
+        } else {
+          apiUrl = "http://localhost:8000/api/influence";
+        }
         
-        const response = await fetch(`${backendUrl}/api/influence`, {
+        const response = await fetch(apiUrl, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",

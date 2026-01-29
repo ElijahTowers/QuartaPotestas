@@ -27,7 +27,8 @@
     "react-grid-layout": "^2.2.2",
     "react-hot-toast": "^2.6.0",
     "react-leaflet": "^5.0.0",
-    "recharts": "^3.7.0"
+    "recharts": "^3.7.0",
+    "ua-parser-js": "^2.0.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

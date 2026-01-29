@@ -1,0 +1,7 @@
+# Ignore any local credential files (should be in ~/.cloudflared/ but just in case)
+*.json
+credentials.json
+
+# Ignore any local config overrides
+config.local.yml
+

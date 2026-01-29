@@ -34,6 +34,8 @@ export async function fetchLatestArticles(): Promise<DailyEdition> {
       // This reduces the number of requests and avoids auto-cancellation issues
       
       // Fetch all recent articles (single request)
+      // For guests (no auth), this will fail if collection requires auth
+      // We'll catch and handle that in the calling function
       const allArticles = await pb.collection("articles").getList(1, 500, {
         sort: "-published_at",
         expand: "daily_edition_id", // Try to expand relation (may not work, but worth trying)

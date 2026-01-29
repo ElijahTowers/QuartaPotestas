@@ -8,9 +8,17 @@ import { Loader2, ArrowLeft } from "lucide-react";
 
 // Helper to get actual API URL with Cloudflare tunnel support
 function getActualApiUrl(path: string): string {
-  if (typeof window !== "undefined" && window.location.hostname.includes("trycloudflare.com")) {
-    const cleanPath = path.startsWith("/api/") ? path.substring(4) : (path.startsWith("/") ? path : `/${path}`);
-    return `/api/proxy${cleanPath}`;
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    // Use API proxy for production domain or Cloudflare tunnels
+    if (hostname === "quartapotestas.com" || hostname === "www.quartapotestas.com" || hostname.includes("trycloudflare.com")) {
+      const cleanPath = path.startsWith("/api/") ? path.substring(4) : (path.startsWith("/") ? path : `/${path}`);
+      return `/api/proxy${cleanPath}`;
+    }
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return `http://localhost:8000${path.startsWith("/") ? path : `/${path}`}`;
+    }
+    return `http://${hostname}:8000${path.startsWith("/") ? path : `/${path}`}`;
   }
   return `http://localhost:8000${path.startsWith("/") ? path : `/${path}`}`;
 }

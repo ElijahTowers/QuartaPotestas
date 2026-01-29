@@ -1,0 +1,19 @@
+tunnel: 3f830e84-45e8-43af-bc98-8f44bd61d085
+credentials-file: ~/.cloudflared/3f830e84-45e8-43af-bc98-8f44bd61d085.json
+
+ingress:
+  # Rule 1: Database (PocketBase)
+  - hostname: db.quartapotestas.com
+    service: http://localhost:8090
+
+  # Rule 2: Main Game Site (Next.js)
+  - hostname: quartapotestas.com
+    service: http://localhost:3000
+
+  # Rule 3: WWW subdomain (redirects to main)
+  - hostname: www.quartapotestas.com
+    service: http://localhost:3000
+
+  # Rule 4: Catch-all (404 for unmatched requests)
+  - service: http_status:404
+

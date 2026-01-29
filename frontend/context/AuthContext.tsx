@@ -6,21 +6,33 @@ import { getPocketBase } from "@/lib/pocketbase";
 interface AuthContextType {
   user: any | null;
   isAuthenticated: boolean;
+  isGuest: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   register: (email: string, password: string, passwordConfirm: string) => Promise<void>;
+  enterGuestMode: () => void;
+  updateUsername: (username: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<any | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const pb = getPocketBase();
 
   // Load auth state on mount
   useEffect(() => {
+    // Check if user is in guest mode
+    const guestMode = localStorage.getItem("guestMode") === "true";
+    if (guestMode) {
+      setIsGuest(true);
+      setIsLoading(false);
+      return;
+    }
+
     // Check if user is already authenticated
     const authData = pb.authStore.model;
     if (authData) {
@@ -31,6 +43,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Listen for auth changes
     const unsubscribe = pb.authStore.onChange((token, model) => {
       setUser(model);
+      // Clear guest mode if user logs in
+      if (model) {
+        setIsGuest(false);
+        localStorage.removeItem("guestMode");
+      }
     });
 
     return () => {
@@ -49,10 +66,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (email: string, password: string, passwordConfirm: string) => {
     try {
+      // Generate default username from email
+      const generateDefaultUsername = (email: string): string => {
+        const base = email.split("@")[0].replace(/[^a-z0-9]/gi, "").toLowerCase();
+        const random = Math.floor(Math.random() * 1000);
+        return `${base}${random}`;
+      };
+
+      const defaultUsername = generateDefaultUsername(email);
+
       const userData = await pb.collection("users").create({
         email,
         password,
         passwordConfirm,
+        username: defaultUsername,
       });
       // Auto-login after registration
       await login(email, password);
@@ -64,6 +91,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     pb.authStore.clear();
     setUser(null);
+    setIsGuest(false);
+    localStorage.removeItem("guestMode");
+  };
+
+  const enterGuestMode = () => {
+    setIsGuest(true);
+    localStorage.setItem("guestMode", "true");
+    // Clear any existing auth
+    pb.authStore.clear();
+    setUser(null);
+  };
+
+  const updateUsername = async (username: string) => {
+    if (!user) {
+      throw new Error("Not authenticated");
+    }
+
+    // Client-side validation (backend will also validate)
+    if (!username || username.trim().length === 0) {
+      throw new Error("Username cannot be empty");
+    }
+
+    if (username.length < 3) {
+      throw new Error("Username must be at least 3 characters");
+    }
+
+    if (username.length > 30) {
+      throw new Error("Username must be less than 30 characters");
+    }
+
+    // Only allow alphanumeric and underscores
+    if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+      throw new Error("Username can only contain letters, numbers, and underscores");
+    }
+
+    try {
+      // Use backend API endpoint which enforces uniqueness
+      const { updateUsername: updateUsernameAPI } = await import("@/lib/api");
+      await updateUsernameAPI(username.trim());
+      
+      // Refresh user data from PocketBase
+      const updatedUser = await pb.collection("users").getOne(user.id);
+      setUser(updatedUser);
+    } catch (error: any) {
+      throw new Error(error.message || "Failed to update username");
+    }
   };
 
   return (
@@ -71,10 +144,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         isAuthenticated: !!user,
+        isGuest,
         isLoading,
         login,
         logout,
         register,
+        enterGuestMode,
+        updateUsername,
       }}
     >
       {children}

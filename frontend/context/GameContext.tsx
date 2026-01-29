@@ -60,19 +60,22 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [isAuthenticated]);
   
   // Wrapper function to save to database when newspaper name changes
+  // Re-throws errors so components can handle them (e.g., show validation errors)
   const setNewspaperName = useCallback(async (name: string) => {
-    setNewspaperNameState(name);
-    
     // Save to database if authenticated
     if (isAuthenticated) {
       try {
         await updateNewspaperName(name);
-        toast.success("Newspaper name saved", { duration: 2000 });
+        // Only update local state if save succeeded
+        setNewspaperNameState(name);
       } catch (error) {
         console.error("Failed to save newspaper name:", error);
-        toast.error("Failed to save newspaper name", { duration: 3000 });
-        // Continue even if save fails - user can try again
+        // Re-throw to let the calling component handle the error
+        throw error;
       }
+    } else {
+      // Not authenticated, just update local state
+      setNewspaperNameState(name);
     }
   }, [isAuthenticated]);
   
