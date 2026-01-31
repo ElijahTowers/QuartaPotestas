@@ -23,8 +23,8 @@ export function middleware(request: NextRequest) {
     "max-age=31536000; includeSubDomains; preload"
   );
   
-  // X-Frame-Options
-  response.headers.set("X-Frame-Options", "DENY");
+  // X-Frame-Options - Allow same-origin embedding (needed for NewspaperAnimation iframe)
+  response.headers.set("X-Frame-Options", "SAMEORIGIN");
   
   // X-Content-Type-Options
   response.headers.set("X-Content-Type-Options", "nosniff");

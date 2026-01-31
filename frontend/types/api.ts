@@ -13,6 +13,13 @@ export interface AudienceScores {
   doomers: number;
 }
 
+// Audience scores per variant
+export interface AudienceScoresPerVariant {
+  factual: AudienceScores;
+  sensationalist: AudienceScores;
+  propaganda: AudienceScores;
+}
+
 export interface Article {
   id: string; // Changed from number to string (PocketBase ID)
   original_title: string;
@@ -31,7 +38,7 @@ export interface Article {
   date: string;
   published_at: string | null;
   assistant_comment?: string; // Short commentary from the editor
-  audience_scores?: AudienceScores; // Faction reaction scores (-10 to +10)
+  audience_scores?: AudienceScoresPerVariant; // Faction reaction scores per variant (-10 to +10)
 }
 
 export interface DailyEdition {

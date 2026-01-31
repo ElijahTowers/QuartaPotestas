@@ -3,11 +3,13 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Merriweather } from "next/font/google";
 import { GameProvider } from "@/context/GameContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { TutorialProvider } from "@/context/TutorialContext";
 import { Toaster } from "react-hot-toast";
 import TelemetryTracker from "@/components/analytics/Tracker";
 import PreAlphaBanner from "@/components/PreAlphaBanner";
 import GuestModeBanner from "@/components/GuestModeBanner";
 import DevOverlayController from "@/components/DevOverlayController";
+import Tutorial from "@/components/tutorial/Tutorial";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -38,17 +40,22 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${merriweather.variable} antialiased`}
       >
         <PreAlphaBanner />
         <AuthProvider>
-          <DevOverlayController />
-          <GuestModeBanner />
-          <GameProvider>
-            <TelemetryTracker />
-            {children}
-            <Toaster
+          <TutorialProvider>
+            <DevOverlayController />
+            <GuestModeBanner />
+            <GameProvider>
+              <TelemetryTracker />
+              {children}
+              <Tutorial />
+              <Toaster
               position="top-right"
               toastOptions={{
                 duration: 4000,
@@ -73,6 +80,7 @@ export default function RootLayout({
               }}
             />
           </GameProvider>
+          </TutorialProvider>
         </AuthProvider>
       </body>
     </html>

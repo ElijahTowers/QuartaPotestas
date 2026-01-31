@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import { getRecentTransactions, Transaction, getAudienceSnapshot } from "@/lib/api";
+import { getRecentTransactions, Transaction, getAudienceSnapshot, getYesterdayEdition, getDayBeforeYesterdayEdition } from "@/lib/api";
 import AudienceRadar from "@/components/analytics/AudienceRadar";
 import type { AudienceScores } from "@/types/api";
 import GameLayout from "@/components/GameLayout";
@@ -13,17 +13,122 @@ import ShopModal from "@/components/ShopModal";
 import UsernameEditor from "@/components/UsernameEditor";
 import NewspaperNameEditor from "@/components/NewspaperNameEditor";
 import { motion } from "framer-motion";
+import { useTutorial } from "@/context/TutorialContext";
+import { BookOpen } from "lucide-react";
+import MorningReport from "@/components/MorningReport";
+import NewspaperAnimation from "@/components/NewspaperAnimation";
 
 export default function HubPage() {
   const router = useRouter();
-  const { treasury, newspaperName, setNewspaperName, readers, credibility } = useGame();
+  const { treasury, newspaperName, setNewspaperName, readers, credibility, refreshGameState } = useGame();
   const { user } = useAuth();
+  const { startTutorial, hasCompleted } = useTutorial();
+  
+  // State for yesterday's paper and morning report
+  const [yesterdayEdition, setYesterdayEdition] = useState<any | null>(null);
+  const [showYesterdayPaper, setShowYesterdayPaper] = useState(false);
+  const [reportData, setReportData] = useState<{
+    totalCash: number;
+    cashBreakdown: { ads: number; bonuses: number; penalties: number };
+    totalReaders: number;
+    readerChange: number;
+    credibilityScore: number;
+    credibilityEvents: string[];
+    editionId: number | null;
+  } | null>(null);
+  const [pendingReportData, setPendingReportData] = useState<{
+    totalCash: number;
+    cashBreakdown: { ads: number; bonuses: number; penalties: number };
+    totalReaders: number;
+    readerChange: number;
+    credibilityScore: number;
+    credibilityEvents: string[];
+    editionId: number | null;
+  } | null>(null);
+  
+  const handleStartTutorial = () => {
+    // Start tutorial first
+    startTutorial();
+    // Navigate to the first page of the tutorial (map page)
+    // Use a longer delay to ensure the page is fully loaded before tutorial tries to find elements
+    setTimeout(() => {
+      router.push("/");
+    }, 300);
+  };
   const [isShopOpen, setIsShopOpen] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
   const [audienceScores, setAudienceScores] = useState<AudienceScores | null>(null);
   const [isLoadingAudience, setIsLoadingAudience] = useState(true);
   
+  // Check for yesterday's paper on hub page load (automatic day check)
+  useEffect(() => {
+    async function checkYesterdayPaper() {
+      if (!user?.id) return;
+      
+      // Only check once per user per day (track by user ID and date)
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const storageKey = `yesterdayPaperChecked_${user.id}_${today}`;
+      const hasCheckedToday = localStorage.getItem(storageKey);
+      
+      if (hasCheckedToday) {
+        return; // Already checked today, skip
+      }
+      
+      // Mark that we've checked today
+      localStorage.setItem(storageKey, 'true');
+      
+      try {
+        const yesterday = await getYesterdayEdition();
+        if (yesterday) {
+          setYesterdayEdition(yesterday);
+          // Show the paper first, then Morning Report
+          setShowYesterdayPaper(true);
+          
+          // Calculate stats for Morning Report
+          const dayBefore = await getDayBeforeYesterdayEdition();
+          const previousReaders = dayBefore?.stats?.readers || 10000; // Default starting readers
+          const yesterdayReaders = yesterday.stats?.readers || 0;
+          const readerChange = yesterdayReaders - previousReaders;
+          
+          // Get recent transactions to calculate cash breakdown
+          const transactions = await getRecentTransactions(10);
+          let ads = 0;
+          let bonuses = 0;
+          let penalties = 0;
+          
+          transactions.forEach(t => {
+            if (t.type === "income") {
+              if (t.description.toLowerCase().includes("ad")) {
+                ads += t.amount;
+              } else if (t.description.toLowerCase().includes("bonus")) {
+                bonuses += t.amount;
+              }
+            } else {
+              penalties += Math.abs(t.amount);
+            }
+          });
+          
+          // Store in pendingReportData instead of reportData directly
+          // This ensures the animation shows first
+          setPendingReportData({
+            totalCash: Math.round(yesterday.stats?.cash || 0),
+            cashBreakdown: { ads, bonuses, penalties },
+            totalReaders: Math.round(yesterdayReaders),
+            readerChange: Math.round(readerChange),
+            credibilityScore: Math.round(yesterday.stats?.credibility || 0),
+            credibilityEvents: [],
+            editionId: yesterday.id,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to check for yesterday's paper:", error);
+      }
+    }
+
+    checkYesterdayPaper();
+  }, [user?.id]);
+
   // Load recent transactions from published editions
   useEffect(() => {
     if (user) {
@@ -107,6 +212,24 @@ export default function HubPage() {
               <h1 className="text-4xl font-bold text-[#e8dcc6] font-serif mb-2">
                 EXECUTIVE DESK
               </h1>
+              {/* Start Tutorial Button */}
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.2 }}
+                className="mt-4"
+              >
+                <button
+                  onClick={handleStartTutorial}
+                  className="px-6 py-2 bg-[#8b6f47] text-[#f4e4bc] rounded hover:bg-[#a68a5a] transition-colors font-mono text-sm font-bold flex items-center gap-2 mx-auto shadow-lg"
+                  style={{
+                    boxShadow: "0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
+                  }}
+                >
+                  <BookOpen className="w-4 h-4" />
+                  {hasCompleted ? "Restart Tutorial" : "Start Tutorial"}
+                </button>
+              </motion.div>
             </div>
 
             {/* Username Editor */}
@@ -139,6 +262,7 @@ export default function HubPage() {
             className="relative"
           >
             <div
+              data-tutorial="treasury"
               className="bg-[#f4e4bc] p-6 rounded shadow-2xl border-2 border-[#8b6f47] relative"
               style={{
                 transform: "rotate(-2deg)",
@@ -345,7 +469,7 @@ export default function HubPage() {
                     Loading faction impact...
                   </p>
                 ) : (
-                  <div className="w-full max-w-xl mx-auto">
+                  <div data-tutorial="audience-radar" className="w-full max-w-xl mx-auto">
                     <AudienceRadar audienceScores={audienceScores} size="medium" />
                   </div>
                 )}
@@ -360,6 +484,50 @@ export default function HubPage() {
       
       {/* Shop Modal */}
       <ShopModal isOpen={isShopOpen} onClose={() => setIsShopOpen(false)} />
+      
+      {/* Yesterday's Paper View with Rotating Animation */}
+      <NewspaperAnimation
+        editionId={yesterdayEdition?.id || null}
+        isOpen={showYesterdayPaper && !!yesterdayEdition && !reportData}
+        onClose={() => {
+          setShowYesterdayPaper(false);
+          // Show Morning Report if we have pending report data
+          if (pendingReportData) {
+            setReportData(pendingReportData);
+            setPendingReportData(null);
+          }
+        }}
+        onAnimationComplete={() => {
+          // After animation completes, show Morning Report
+          setShowYesterdayPaper(false);
+          if (pendingReportData) {
+            setReportData(pendingReportData);
+            setPendingReportData(null);
+          }
+        }}
+      />
+
+      {/* Morning Report overlay */}
+      {reportData && (
+        <div className="fixed inset-0 z-[5000] bg-black/80 backdrop-blur-sm">
+          <MorningReport
+            totalCash={reportData.totalCash}
+            cashBreakdown={reportData.cashBreakdown}
+            totalReaders={reportData.totalReaders}
+            readerChange={reportData.readerChange}
+            credibilityScore={reportData.credibilityScore}
+            credibilityEvents={reportData.credibilityEvents}
+            onContinue={async () => {
+              // Refresh game state after viewing Morning Report
+              await refreshGameState();
+              
+              setReportData(null);
+              setShowYesterdayPaper(false);
+              setYesterdayEdition(null);
+            }}
+          />
+        </div>
+      )}
       </div>
     </ProtectedRoute>
   );

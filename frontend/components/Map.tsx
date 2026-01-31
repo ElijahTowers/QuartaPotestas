@@ -283,7 +283,84 @@ function PanToSelected({
   return null;
 }
 
-// Component to disable keyboard and scroll panning, allow only drag panning
+// Component to fix map size when container becomes visible
+function MapSizeFixer() {
+  const map = useMap();
+  const containerRef = useRef<HTMLElement | null>(null);
+  
+  useEffect(() => {
+    if (!map) return;
+    
+    // Get the map container element
+    containerRef.current = map.getContainer();
+    
+    // Fix map size immediately when component mounts
+    // This is especially important when navigating to the map view
+    const fixSize = () => {
+      try {
+        map.invalidateSize();
+        console.log("[MapSizeFixer] Map size invalidated");
+      } catch (error) {
+        console.warn("[MapSizeFixer] Error invalidating size:", error);
+      }
+    };
+    
+    // Fix immediately
+    fixSize();
+    
+    // Also fix after multiple delays to handle layout shifts and navigation
+    const timeoutIds = [
+      setTimeout(fixSize, 100),
+      setTimeout(fixSize, 300),
+      setTimeout(fixSize, 500),
+    ];
+    
+    // Use IntersectionObserver to detect when container becomes visible
+    let observer: IntersectionObserver | null = null;
+    if (containerRef.current) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              // Container is visible, fix size
+              setTimeout(fixSize, 50);
+            }
+          });
+        },
+        { threshold: 0.1 }
+      );
+      observer.observe(containerRef.current);
+    }
+    
+    // Fix when window is resized
+    window.addEventListener("resize", fixSize);
+    
+    // Fix when orientation changes (mobile)
+    window.addEventListener("orientationchange", () => {
+      setTimeout(fixSize, 200);
+    });
+    
+    // Also use whenReady callback if available
+    if (map.whenReady) {
+      map.whenReady(() => {
+        setTimeout(fixSize, 100);
+      });
+    }
+    
+    return () => {
+      timeoutIds.forEach(id => clearTimeout(id));
+      window.removeEventListener("resize", fixSize);
+      window.removeEventListener("orientationchange", fixSize);
+      if (observer && containerRef.current) {
+        observer.unobserve(containerRef.current);
+      }
+    };
+  }, [map]);
+  
+  return null;
+}
+
+// Component to control map interactions - enable scroll zoom, allow drag panning
 function PanningController() {
   const map = useMap();
   
@@ -293,8 +370,8 @@ function PanningController() {
     // Disable keyboard navigation
     map.keyboard.disable();
     
-    // Disable scroll zoom panning
-    map.scrollWheelZoom.disable();
+    // Enable scroll wheel zoom - allows users to zoom in/out with mouse wheel
+    map.scrollWheelZoom.enable();
     
     // Disable box zoom (shift+click drag)
     if (map.boxZoom) {
@@ -306,7 +383,7 @@ function PanningController() {
       map.doubleClickZoom.disable();
     }
     
-    // Keep dragging enabled (it's enabled by default) - this is the only way to pan
+    // Keep dragging enabled (it's enabled by default) - allows panning by dragging
     map.dragging.enable();
     
     return () => {
@@ -912,6 +989,7 @@ export default function Map(props: MapProps) {
         className="sepia-map"
       >
         <MapStyle />
+        <MapSizeFixer />
         <LogInitialView />
         <PanningController />
         <InitializeWorldView selectedArticleId={selectedArticleId} />

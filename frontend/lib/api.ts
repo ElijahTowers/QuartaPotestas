@@ -227,10 +227,11 @@ export async function fetchFeed(): Promise<import("@/types/api").DailyEdition> {
 }
 
 /**
- * Aggregate audience scores across the current feed articles
- * to get a snapshot of how each faction is reacting overall.
+ * Get total audience impact from all published editions.
+ * Calculates the sum of audience scores from all articles in published editions,
+ * using the variant that was actually published for each article.
  */
-export async function getAudienceSnapshot(): Promise<import("@/types/api").AudienceScores> {
+export async function getAudienceImpact(): Promise<import("@/types/api").AudienceScores> {
   // Default zeroed scores
   const emptyScores: import("@/types/api").AudienceScores = {
     elite: 0,
@@ -243,38 +244,63 @@ export async function getAudienceSnapshot(): Promise<import("@/types/api").Audie
     doomers: 0,
   };
 
+  // Always try to get token from PocketBase first
+  let token: string | null = null;
+  
   try {
-    const edition = await fetchLatestArticles();
-    const articles = edition.articles || [];
-
-    if (!articles.length) return emptyScores;
-
-    const totals = { ...emptyScores };
-    const counts = { ...emptyScores };
-
-    for (const article of articles) {
-      if (!article.audience_scores) continue;
-      for (const key of Object.keys(emptyScores) as (keyof typeof emptyScores)[]) {
-        const val = article.audience_scores[key];
-        if (typeof val === "number") {
-          totals[key] += val;
-          counts[key] += 1;
-        }
-      }
-    }
-
-    const averaged: import("@/types/api").AudienceScores = { ...emptyScores };
-    (Object.keys(emptyScores) as (keyof typeof emptyScores)[]).forEach((key) => {
-      if (counts[key] > 0) {
-        averaged[key] = Math.round(totals[key] / counts[key]);
-      }
-    });
-
-    return averaged;
-  } catch (error) {
-    console.error("Failed to compute audience snapshot:", error);
+    const { getPocketBase } = await import("./pocketbase");
+    const pb = getPocketBase();
+    token = pb.authStore.token;
+  } catch (e) {
+    token = localStorage.getItem("token");
+  }
+  
+  if (!token) {
+    console.warn("No authentication token, returning empty scores");
     return emptyScores;
   }
+
+  try {
+    const apiUrl = getActualApiUrl("/api/published-editions/audience-impact");
+    
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "omit",
+      mode: "cors",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      console.error(`Failed to get audience impact (${response.status}): ${errorText}`);
+      return emptyScores;
+    }
+
+    const impact = await response.json();
+    return impact as import("@/types/api").AudienceScores;
+  } catch (error) {
+    console.error("Failed to get audience impact:", error);
+    return emptyScores;
+  }
+}
+
+/**
+ * Aggregate audience scores across the current feed articles
+ * to get a snapshot of how each faction is reacting overall.
+ * 
+ * @deprecated Use getAudienceImpact() instead, which uses published editions
+ * @param variant - The variant to use for scoring ("factual", "sensationalist", or "propaganda")
+ *                  If not provided, defaults to "factual"
+ */
+export async function getAudienceSnapshot(
+  variant: "factual" | "sensationalist" | "propaganda" = "factual"
+): Promise<import("@/types/api").AudienceScores> {
+  // Default to using published editions impact
+  return getAudienceImpact();
 }
 
 export async function fetchLatestArticles(): Promise<import("@/types/api").DailyEdition> {
@@ -580,7 +606,10 @@ export async function triggerIngest(): Promise<any> {
   }
 }
 
-export async function resetAndIngest(): Promise<any> {
+/**
+ * Start an async ingestion job and return the job ID
+ */
+export async function startResetAndIngest(): Promise<{ job_id: string; status: string; message: string }> {
   // Always try to get token from PocketBase first (app uses PocketBase for auth)
   let token: string | null = null;
   
@@ -597,21 +626,7 @@ export async function resetAndIngest(): Promise<any> {
     throw new Error("Authentication required. Please log in first.");
   }
 
-  // For long-running requests like reset-and-ingest, use direct localhost if available
-  // Cloudflare tunnels have a timeout (~100s) which can be exceeded
-  let apiUrl: string;
-  if (typeof window !== "undefined") {
-    const hostname = window.location.hostname;
-    // If accessing via localhost, use direct connection to avoid tunnel timeout
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      apiUrl = "http://localhost:8000/api/debug/reset-and-ingest";
-    } else {
-      // Use tunnel/proxy for remote access
-      apiUrl = getActualApiUrl("/api/debug/reset-and-ingest");
-    }
-  } else {
-    apiUrl = getActualApiUrl("/api/debug/reset-and-ingest");
-  }
+  const apiUrl = getActualApiUrl("/api/debug/reset-and-ingest");
 
   try {
     const response = await fetch(apiUrl, {
@@ -623,26 +638,14 @@ export async function resetAndIngest(): Promise<any> {
       },
       credentials: "omit",
       mode: "cors",
-      // Increase timeout for long-running requests (browser default is usually 5 minutes)
-      // Note: This doesn't affect Cloudflare tunnel timeout, but helps with local requests
     });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      
-      // Handle Cloudflare timeout errors specifically
-      if (response.status === 524 || errorText.includes("524") || errorText.includes("timeout")) {
-        throw new Error(
-          "Request timeout: De reset-and-ingest operatie duurt te lang via de Cloudflare tunnel. " +
-          "Als je lokaal werkt, gebruik dan localhost in plaats van de tunnel URL. " +
-          "Of probeer het later opnieuw."
-        );
-      }
-      
-      throw new Error(`Failed to reset and ingest (${response.status}): ${errorText.substring(0, 200)}`);
+      throw new Error(`Failed to start ingestion job (${response.status}): ${errorText.substring(0, 200)}`);
     }
 
-    return response.json();
+    return await response.json();
   } catch (error) {
     if (error instanceof TypeError) {
       const errorMsg = error.message.includes("Failed to fetch")
@@ -652,6 +655,162 @@ export async function resetAndIngest(): Promise<any> {
     }
     throw error;
   }
+}
+
+/**
+ * Check the status of an ingestion job
+ */
+export async function getIngestionJobStatus(jobId: string): Promise<{
+  status: "pending" | "running" | "completed" | "failed";
+  progress?: string;
+  result?: any;
+  error?: string;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+}> {
+  let token: string | null = null;
+  
+  try {
+    const { getPocketBase } = await import("./pocketbase");
+    const pb = getPocketBase();
+    token = pb.authStore.token;
+  } catch (e) {
+    token = localStorage.getItem("token");
+  }
+  
+  if (!token) {
+    throw new Error("Authentication required. Please log in first.");
+  }
+
+  const apiUrl = getActualApiUrl(`/api/debug/job-status/${jobId}`);
+
+  try {
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "omit",
+      mode: "cors",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to get job status (${response.status}): ${errorText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof TypeError) {
+      const errorMsg = error.message.includes("Failed to fetch")
+        ? `Cannot connect to backend. Please ensure the backend is running on port 8000.`
+        : `Network error: ${error.message}`;
+      throw new Error(errorMsg);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Poll for job completion and return the final result
+ */
+export async function resetAndIngestWithPolling(
+  onProgress?: (progress: string, status: string) => void
+): Promise<any> {
+  // Start the job
+  const { job_id } = await startResetAndIngest();
+  
+  // Poll for status
+  const pollInterval = 2000; // Poll every 2 seconds
+  const maxPollTime = 10 * 60 * 1000; // Max 10 minutes
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxPollTime) {
+    const status = await getIngestionJobStatus(job_id);
+    
+    if (onProgress && status.progress) {
+      onProgress(status.progress, status.status);
+    }
+    
+    if (status.status === "completed") {
+      const result = status.result;
+      
+      // Log timing information for future progress indicators
+      if (result?.scoop_timings && result?.timing_stats) {
+        console.log("[resetAndIngest] Scoop Timing Statistics:", {
+          total_scoops: result.timing_stats.total_scoops,
+          total_seconds: result.timing_stats.total_seconds,
+          average_seconds: result.timing_stats.average_seconds,
+          min_seconds: result.timing_stats.min_seconds,
+          max_seconds: result.timing_stats.max_seconds,
+        });
+        
+        // Calculate average timing per step
+        const stepAverages: Record<string, { total: number; count: number; avg: number }> = {};
+        
+        result.scoop_timings.forEach((scoop: any) => {
+          if (scoop.step_timings) {
+            Object.entries(scoop.step_timings).forEach(([step, duration]) => {
+              if (typeof duration === 'number') {
+                if (!stepAverages[step]) {
+                  stepAverages[step] = { total: 0, count: 0, avg: 0 };
+                }
+                stepAverages[step].total += duration;
+                stepAverages[step].count += 1;
+              }
+            });
+          }
+        });
+        
+        // Calculate averages
+        const stepStats: Record<string, number> = {};
+        Object.entries(stepAverages).forEach(([step, data]) => {
+          stepStats[step] = data.count > 0 ? Math.round((data.total / data.count) * 100) / 100 : 0;
+        });
+        
+        console.log("[resetAndIngest] Average Time Per Step (seconds):", stepStats);
+        console.log("[resetAndIngest] Per-Scoop Timings:", result.scoop_timings);
+        
+        // Store timing data in localStorage for future reference
+        try {
+          const timingHistory = JSON.parse(localStorage.getItem("scoop_timing_history") || "[]");
+          timingHistory.push({
+            timestamp: new Date().toISOString(),
+            stats: result.timing_stats,
+            step_averages: stepStats,
+            scoops: result.scoop_timings,
+          });
+          // Keep only last 10 runs
+          const recentHistory = timingHistory.slice(-10);
+          localStorage.setItem("scoop_timing_history", JSON.stringify(recentHistory));
+        } catch (e) {
+          console.warn("[resetAndIngest] Failed to store timing history:", e);
+        }
+      }
+      
+      return result;
+    }
+    
+    if (status.status === "failed") {
+      throw new Error(status.error || "Ingestion job failed");
+    }
+    
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+  }
+  
+  throw new Error("Ingestion job timed out after 10 minutes");
+}
+
+/**
+ * Legacy function - now uses async job with polling
+ * @deprecated Use resetAndIngestWithPolling for better progress tracking
+ */
+export async function resetAndIngest(): Promise<any> {
+  return resetAndIngestWithPolling();
 }
 
 export interface PublishStats {
@@ -1062,6 +1221,202 @@ export interface PublicEditionResponse {
   published_at: string;
   stats: { cash?: number; credibility?: number; readers?: number };
   published_items: PublicPublishedItem[];
+  username?: string;
+}
+
+export interface PublishedEditionResponse {
+  id: string;
+  user: string;
+  date: string;
+  newspaper_name?: string;
+  grid_layout: any;
+  stats: { cash?: number; credibility?: number; readers?: number };
+  published_at: string;
+  created?: string;
+  updated?: string;
+}
+
+/**
+ * Get all published editions for the current user
+ */
+export async function getAllPublishedEditions(): Promise<PublishedEditionResponse[]> {
+  try {
+    // Get token from PocketBase auth store
+    const { getPocketBase } = await import("@/lib/pocketbase");
+    const pb = getPocketBase();
+    const token = pb.authStore.token;
+
+    if (!token) {
+      throw new Error("Not authenticated");
+    }
+
+    const url = getActualApiUrl("/api/published-editions");
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "omit",
+      mode: "cors",
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to fetch published editions (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data || [];
+  } catch (error) {
+    console.error("Failed to fetch published editions:", error);
+    return [];
+  }
+}
+
+/**
+ * Helper function to parse date from various formats
+ * The backend returns published_at in Dutch format: "DD-MM-YYYY HH:MM:SS" (e.g., "31-12-2024 23:59:59")
+ * We need to convert this to a Date object
+ */
+function parseDate(dateString: string | undefined | null): Date | null {
+  if (!dateString) return null;
+  
+  try {
+    // First, try parsing as ISO string (standard format)
+    const date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+    
+    // If that fails, try parsing Dutch format: "DD-MM-YYYY HH:MM:SS"
+    // Example: "31-12-2024 23:59:59"
+    const dutchFormatRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2})$/;
+    const match = dateString.match(dutchFormatRegex);
+    
+    if (match) {
+      const [, day, month, year, hour, minute, second] = match;
+      // Create ISO string: YYYY-MM-DDTHH:MM:SS
+      const isoString = `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+      const parsedDate = new Date(isoString);
+      if (!isNaN(parsedDate.getTime())) {
+        return parsedDate;
+      }
+    }
+    
+    console.warn("Could not parse date string:", dateString);
+    return null;
+  } catch (error) {
+    console.error("Failed to parse date:", dateString, error);
+    return null;
+  }
+}
+
+/**
+ * Check if user has already sent a paper to press today
+ */
+export async function hasPublishedToday(): Promise<boolean> {
+  try {
+    const editions = await getAllPublishedEditions();
+    if (editions.length === 0) return false;
+    
+    // Get today's date in ISO format (YYYY-MM-DD)
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Check if the most recent edition is from today
+    const mostRecent = editions[0];
+    if (!mostRecent.published_at) return false;
+    
+    // Parse the published_at date
+    const publishedDateObj = parseDate(mostRecent.published_at);
+    if (!publishedDateObj) {
+      // If parsing fails, try using the date field as fallback
+      console.warn("Failed to parse published_at, trying date field:", mostRecent.date);
+      return false; // Can't determine, assume not published today
+    }
+    
+    const publishedDate = publishedDateObj.toISOString().split('T')[0];
+    
+    return publishedDate === today;
+  } catch (error) {
+    console.error("Failed to check if published today:", error);
+    return false;
+  }
+}
+
+/**
+ * Get yesterday's published edition (if it exists)
+ */
+export async function getYesterdayEdition(): Promise<PublishedEditionResponse | null> {
+  try {
+    const editions = await getAllPublishedEditions();
+    if (editions.length === 0) return null;
+    
+    // Get yesterday's date in ISO format (YYYY-MM-DD)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    // Find edition from yesterday
+    for (const edition of editions) {
+      if (!edition.published_at) continue;
+      
+      // Parse the published_at date
+      const publishedDateObj = parseDate(edition.published_at);
+      if (!publishedDateObj) {
+        continue; // Skip if we can't parse the date
+      }
+      
+      const publishedDate = publishedDateObj.toISOString().split('T')[0];
+      
+      if (publishedDate === yesterdayStr) {
+        return edition;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Failed to get yesterday's edition:", error);
+    return null;
+  }
+}
+
+/**
+ * Get the edition from the day before yesterday (for calculating reader change)
+ */
+export async function getDayBeforeYesterdayEdition(): Promise<PublishedEditionResponse | null> {
+  try {
+    const editions = await getAllPublishedEditions();
+    if (editions.length === 0) return null;
+    
+    // Get day before yesterday's date in ISO format (YYYY-MM-DD)
+    const dayBeforeYesterday = new Date();
+    dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+    const dayBeforeYesterdayStr = dayBeforeYesterday.toISOString().split('T')[0];
+    
+    // Find edition from day before yesterday
+    for (const edition of editions) {
+      if (!edition.published_at) continue;
+      
+      // Parse the published_at date
+      const publishedDateObj = parseDate(edition.published_at);
+      if (!publishedDateObj) {
+        continue; // Skip if we can't parse the date
+      }
+      
+      const publishedDate = publishedDateObj.toISOString().split('T')[0];
+      
+      if (publishedDate === dayBeforeYesterdayStr) {
+        return edition;
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    console.error("Failed to get day before yesterday's edition:", error);
+    return null;
+  }
 }
 
 /**

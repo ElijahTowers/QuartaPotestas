@@ -90,6 +90,7 @@ export default function NewspaperLayout({
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<{ cash: number; credibility: number; readers: number } | null>(null);
   const [paperName, setPaperName] = useState<string>(newspaperName);
+  const [username, setUsername] = useState<string | null>(null);
 
   // Update publishedItems when prop changes (for real-time editor preview)
   useEffect(() => {
@@ -126,6 +127,7 @@ export default function NewspaperLayout({
 
         setPublishedItems(mappedItems);
         setPaperName(editionData.newspaper_name || newspaperName);
+        setUsername(editionData.username || null);
 
         const parsedDate = new Date(editionData.date);
         setDate(Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate);
@@ -257,7 +259,7 @@ export default function NewspaperLayout({
         <footer className="mt-8 pt-4 border-t-2 border-[#1a1a1a] text-center">
           <p className="text-xs text-[#666]">
             © {new Date().getFullYear()} {paperName}. All rights reserved. | 
-            Printed in Dystopia | 
+            Printed in Dystopia{username ? ` | Editor: ${username}` : ""} | 
             "The Truth, Sometimes"
           </p>
         </footer>

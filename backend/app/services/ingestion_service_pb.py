@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 import json
 import os
 import sys
+import time
 
 # Add parent directory to path to import lib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -123,15 +124,28 @@ class IngestionServicePB:
         if IngestionServicePB.TEST_MODE and len(raw_articles) > 5:
             print(f"[IngestionServicePB] TEST MODE: Processing only 5 of {len(raw_articles)} articles")
         
-        for raw_article in articles_to_process:
+        # Track timing for each scoop
+        scoop_timings: List[Dict[str, Any]] = []
+        
+        for idx, raw_article in enumerate(articles_to_process, start=1):
+            scoop_start_time = time.time()
+            scoop_title = raw_article.get("title", f"Article {idx}")[:50]  # Truncate for logging
+            
             try:
+                step_timings = {}
+                
                 # Simplify the original article text using AI
                 original_title = raw_article.get("title", "")
                 original_content = raw_article.get("summary", raw_article.get("description", ""))
                 
                 # Simplify title and content
+                step_start = time.time()
                 simplified_title = self.ai_service.simplify_english(original_title, max_words=10)
+                step_timings["simplify_title"] = round(time.time() - step_start, 2)
+                
+                step_start = time.time()
                 simplified_content = self.ai_service.simplify_english(original_content)
+                step_timings["simplify_content"] = round(time.time() - step_start, 2)
                 
                 title = simplified_title
                 content = simplified_content
@@ -149,26 +163,38 @@ class IngestionServicePB:
                     else:
                         published_at = datetime.now()
                 
+                step_start = time.time()
                 ai_result = self.ai_service.generate_article_variants(title, content)
+                step_timings["generate_variants"] = round(time.time() - step_start, 2)
                 
                 # Get coordinates
                 location_city = ai_result.get("location_city", "Unknown")
                 
+                step_start = time.time()
                 if location_city == "Unknown" or not location_city:
                     location_city = self.ai_service.extract_location(title, content)
+                    step_timings["extract_location"] = round(time.time() - step_start, 2)
+                else:
+                    step_timings["extract_location"] = 0
                 
+                step_start = time.time()
                 lat, lon = self.geo_service.get_coordinates(location_city)
+                step_timings["geocoding"] = round(time.time() - step_start, 2)
                 
                 # Fallback coordinates
                 if lat is None or lon is None:
                     lat, lon = self.geo_service.get_fallback_coordinates(location_city)
                 
+                step_start = time.time()
                 if lat is None or lon is None:
                     country = self.ai_service.extract_country(title, content)
+                    step_timings["extract_country"] = round(time.time() - step_start, 2)
                     if country != "Unknown":
                         lat, lon = self.geo_service.get_country_center(country)
                         if lat and lon:
                             location_city = country
+                else:
+                    step_timings["extract_country"] = 0
                 
                 if lat is None or lon is None:
                     location_lower = location_city.lower() if location_city else ""
@@ -230,19 +256,57 @@ class IngestionServicePB:
                 article_data["tags"] = json.dumps(article_data["tags"])
                 article_data["audience_scores"] = json.dumps(article_data["audience_scores"])
                 
+                step_start = time.time()
                 article = await self.pb.create_record("articles", article_data)
+                step_timings["save_to_db"] = round(time.time() - step_start, 2)
+                
+                scoop_end_time = time.time()
+                scoop_duration = scoop_end_time - scoop_start_time
                 
                 if article:
                     processed_count += 1
+                    scoop_timings.append({
+                        "scoop_index": idx,
+                        "title": scoop_title,
+                        "duration_seconds": round(scoop_duration, 2),
+                        "status": "success",
+                        "step_timings": step_timings
+                    })
+                    print(f"[IngestionServicePB] ✅ Scoop {idx}/{len(articles_to_process)} processed in {scoop_duration:.2f}s: {scoop_title}")
+                    print(f"  Step breakdown: {json.dumps(step_timings, indent=2)}")
                 else:
-                    print(f"Failed to create article: {title[:50]}...")
+                    scoop_timings.append({
+                        "scoop_index": idx,
+                        "title": scoop_title,
+                        "duration_seconds": round(scoop_duration, 2),
+                        "status": "failed",
+                        "error": "Failed to create article record",
+                        "step_timings": step_timings
+                    })
+                    print(f"[IngestionServicePB] ❌ Failed to create article: {title[:50]}... (took {scoop_duration:.2f}s)")
                 
             except Exception as e:
-                print(f"Error processing article '{raw_article.get('title', 'Unknown')}': {e}")
+                scoop_end_time = time.time()
+                scoop_duration = scoop_end_time - scoop_start_time
+                scoop_timings.append({
+                    "scoop_index": idx,
+                    "title": scoop_title,
+                    "duration_seconds": round(scoop_duration, 2),
+                    "status": "error",
+                    "error": str(e),
+                    "step_timings": step_timings if 'step_timings' in locals() else {}
+                })
+                print(f"[IngestionServicePB] ❌ Error processing article '{raw_article.get('title', 'Unknown')}': {e} (took {scoop_duration:.2f}s)")
                 continue
         
         # Load ads (for later use)
         ads = self.load_ads()
+        
+        # Calculate timing statistics
+        total_time = sum(s["duration_seconds"] for s in scoop_timings)
+        avg_time = total_time / len(scoop_timings) if scoop_timings else 0
+        min_time = min(s["duration_seconds"] for s in scoop_timings) if scoop_timings else 0
+        max_time = max(s["duration_seconds"] for s in scoop_timings) if scoop_timings else 0
         
         return {
             "status": "success",
@@ -250,5 +314,13 @@ class IngestionServicePB:
             "date": str(today),
             "articles_processed": processed_count,
             "ads_available": len(ads),
+            "scoop_timings": scoop_timings,
+            "timing_stats": {
+                "total_seconds": round(total_time, 2),
+                "average_seconds": round(avg_time, 2),
+                "min_seconds": round(min_time, 2),
+                "max_seconds": round(max_time, 2),
+                "total_scoops": len(scoop_timings)
+            }
         }
 

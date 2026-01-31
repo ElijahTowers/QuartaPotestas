@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, animate } from "framer-motion";
+import { getAllPublishedEditions, type PublishedEditionResponse } from "@/lib/api";
 
 export interface MorningReportProps {
   totalCash: number;
@@ -72,15 +73,21 @@ function CountUp({
 }) {
   const mv = useMotionValue(0);
   const [display, setDisplay] = useState(format(0));
+  const formatRef = useRef(format);
+
+  // Update format ref when format changes
+  useEffect(() => {
+    formatRef.current = format;
+  }, [format]);
 
   useEffect(() => {
     const controls = animate(mv, value, {
       duration,
       ease: "easeOut",
-      onUpdate: (latest) => setDisplay(format(Math.round(latest))),
+      onUpdate: (latest) => setDisplay(formatRef.current(Math.round(latest))),
     });
     return () => controls.stop();
-  }, [mv, value, duration, format]);
+  }, [mv, value, duration]); // Removed format from dependencies
 
   return <span>{display}</span>;
 }
@@ -105,10 +112,39 @@ export default function MorningReport(props: MorningReportProps) {
 
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
   const [eventsFlashIndex, setEventsFlashIndex] = useState(0);
+  const [readerHistory, setReaderHistory] = useState<Array<{ date: string; readers: number }>>([]);
 
   const typeLine = useTypewriter("AD REVENUE...", step >= 1);
 
   const verdict = useMemo(() => Verdict({ score: credibilityScore }), [credibilityScore]);
+
+  // Fetch reader history from all published editions
+  useEffect(() => {
+    async function fetchReaderHistory() {
+      try {
+        const editions = await getAllPublishedEditions();
+        // Sort by published_at ascending (oldest first) for timeline
+        const sorted = [...editions].sort((a, b) => {
+          const dateA = new Date(a.published_at).getTime();
+          const dateB = new Date(b.published_at).getTime();
+          return dateA - dateB;
+        });
+        
+        const history = sorted
+          .map((edition) => ({
+            date: edition.published_at,
+            readers: edition.stats?.readers || 0,
+          }))
+          .filter((item) => item.readers > 0); // Only include editions with readers
+        
+        setReaderHistory(history);
+      } catch (error) {
+        console.error("Failed to fetch reader history:", error);
+      }
+    }
+    
+    fetchReaderHistory();
+  }, []);
 
   // Sequence timings
   useEffect(() => {
@@ -171,13 +207,37 @@ export default function MorningReport(props: MorningReportProps) {
   }, [credibilityScore]);
 
   const graphPath = useMemo(() => {
-    // Simple 2-point line based on change direction/magnitude
+    // Create a path from historical reader data
     // SVG viewBox: 0 0 200 80
-    const mag = Math.min(1, Math.abs(readerChange) / 12000);
-    const y1 = 55;
-    const y2 = arrowUp ? 55 - mag * 35 : 55 + mag * 35;
-    return `M 20 ${y1} L 180 ${y2}`;
-  }, [readerChange, arrowUp]);
+    if (readerHistory.length === 0) {
+      // Fallback: simple 2-point line based on change direction/magnitude
+      const mag = Math.min(1, Math.abs(readerChange) / 12000);
+      const y1 = 55;
+      const y2 = arrowUp ? 55 - mag * 35 : 55 + mag * 35;
+      return `M 20 ${y1} L 180 ${y2}`;
+    }
+    
+    // Use last 10 data points (or all if less than 10)
+    const dataPoints = readerHistory.slice(-10);
+    const minReaders = Math.min(...dataPoints.map((d) => d.readers), totalReaders);
+    const maxReaders = Math.max(...dataPoints.map((d) => d.readers), totalReaders);
+    const range = maxReaders - minReaders || 1; // Avoid division by zero
+    
+    // Add current readers to the end
+    const allPoints = [...dataPoints, { date: new Date().toISOString(), readers: totalReaders }];
+    
+    // Map to SVG coordinates
+    // x: 20 to 180 (spread evenly)
+    // y: 10 to 70 (inverted, so higher readers = lower y)
+    const points = allPoints.map((point, index) => {
+      const x = 20 + (index / (allPoints.length - 1)) * 160;
+      const normalized = (point.readers - minReaders) / range;
+      const y = 70 - normalized * 60; // Inverted: higher readers = lower y
+      return `${x},${y}`;
+    });
+    
+    return `M ${points.join(" L ")}`;
+  }, [readerHistory, totalReaders, readerChange, arrowUp]);
 
   const receiptTotalLabel = useMemo(() => {
     const totalLine = `TOTAL PROFIT: ${formatMoney(totalCash)}`;
@@ -342,20 +402,53 @@ export default function MorningReport(props: MorningReportProps) {
                       stroke={arrowUp ? "#86efac" : "#fca5a5"}
                       strokeWidth="3"
                       strokeLinecap="round"
+                      strokeLinejoin="round"
                       initial={{ pathLength: 0, opacity: 0 }}
                       animate={{ pathLength: step >= 2 ? 1 : 0, opacity: step >= 2 ? 1 : 0 }}
                       transition={{ duration: 0.9, ease: "easeOut", delay: 1.65 }}
                       onAnimationStart={() => dispatchSfx("graph_draw")}
                     />
-                    <circle cx="20" cy="55" r="3" fill="#d4af37" opacity="0.8" />
-                    <circle cx="180" cy={arrowUp ? 55 - Math.min(1, Math.abs(readerChange) / 12000) * 35 : 55 + Math.min(1, Math.abs(readerChange) / 12000) * 35} r="3" fill="#d4af37" opacity="0.9" />
+                    {/* Draw circles for data points */}
+                    {readerHistory.length > 0 && (() => {
+                      const dataPoints = readerHistory.slice(-10);
+                      const allPoints = [...dataPoints, { date: new Date().toISOString(), readers: totalReaders }];
+                      const minReaders = Math.min(...dataPoints.map((d) => d.readers), totalReaders);
+                      const maxReaders = Math.max(...dataPoints.map((d) => d.readers), totalReaders);
+                      const range = maxReaders - minReaders || 1;
+                      
+                      return allPoints.map((point, index) => {
+                        const x = 20 + (index / (allPoints.length - 1)) * 160;
+                        const normalized = (point.readers - minReaders) / range;
+                        const y = 70 - normalized * 60;
+                        return (
+                          <motion.circle
+                            key={index}
+                            cx={x}
+                            cy={y}
+                            r="2.5"
+                            fill="#d4af37"
+                            opacity={index === allPoints.length - 1 ? 0.9 : 0.6}
+                            initial={{ scale: 0, opacity: 0 }}
+                            animate={{ scale: step >= 2 ? 1 : 0, opacity: step >= 2 ? (index === allPoints.length - 1 ? 0.9 : 0.6) : 0 }}
+                            transition={{ delay: 1.65 + (index * 0.05), duration: 0.3 }}
+                          />
+                        );
+                      });
+                    })()}
+                    {/* Fallback: simple 2-point visualization if no history */}
+                    {readerHistory.length === 0 && (
+                      <>
+                        <circle cx="20" cy="55" r="3" fill="#d4af37" opacity="0.8" />
+                        <circle cx="180" cy={arrowUp ? 55 - Math.min(1, Math.abs(readerChange) / 12000) * 35 : 55 + Math.min(1, Math.abs(readerChange) / 12000) * 35} r="3" fill="#d4af37" opacity="0.9" />
+                      </>
+                    )}
                   </svg>
                 </div>
               </div>
             </div>
           </motion.div>
 
-          {/* 3) Credibility gauge */}
+          {/* 3) Credibility (percentage only) */}
           <motion.div
             className="relative md:col-span-1"
             initial={{ scale: 0.96, opacity: 0 }}
@@ -368,91 +461,34 @@ export default function MorningReport(props: MorningReportProps) {
                   Credibility
                 </p>
 
-                <div className="mt-4 flex items-center justify-center">
-                  <div className="relative w-48 h-32">
-                    <svg viewBox="0 0 200 140" className="w-full h-full">
-                      {/* outer bezel */}
-                      <path
-                        d="M 20 120 A 80 80 0 0 1 180 120"
-                        fill="none"
-                        stroke="#d4af37"
-                        strokeWidth="10"
-                        opacity="0.35"
-                      />
-                      <path
-                        d="M 30 120 A 70 70 0 0 1 170 120"
-                        fill="none"
-                        stroke="#8b6f47"
-                        strokeWidth="6"
-                        opacity="0.8"
-                      />
-                      {/* ticks */}
-                      <g stroke="#8b6f47" strokeWidth="2" opacity="0.9">
-                        {Array.from({ length: 9 }).map((_, i) => {
-                          const a = (-120 + (i / 8) * 240) * (Math.PI / 180);
-                          const x1 = 100 + Math.cos(a) * 58;
-                          const y1 = 120 + Math.sin(a) * 58;
-                          const x2 = 100 + Math.cos(a) * 68;
-                          const y2 = 120 + Math.sin(a) * 68;
-                          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />;
-                        })}
-                      </g>
-
-                      {/* needle */}
-                      <motion.g
-                        // Pivot from bottom-center of the gauge (100, 120)
-                        transformOrigin="100 120"
-                        initial={{ rotate: -90 }}
-                        animate={
-                          step >= 3
-                            ? { rotate: [ -90, gaugeAngle + 8, gaugeAngle - 4, gaugeAngle ] }
-                            : { rotate: -90 }
-                        }
-                        transition={{ duration: 1.2, ease: "easeOut", delay: 3.1 }}
-                        onAnimationStart={() => dispatchSfx("gauge_tick")}
-                        onAnimationComplete={() => dispatchSfx("gauge_thud")}
-                      >
-                        {/* Needle pointing up initially (-90deg = 12 o'clock), rotates to correct angle */}
-                        <line x1="100" y1="120" x2="165" y2="120" stroke="#e8dcc6" strokeWidth="3" strokeLinecap="round" />
-                        <circle cx="100" cy="120" r="6" fill="#d4af37" />
-                      </motion.g>
-
-                      <text x="100" y="135" textAnchor="middle" fill="#8b6f47" fontSize="10">
-                        0
-                      </text>
-                      <text x="24" y="58" textAnchor="middle" fill="#8b6f47" fontSize="10">
-                        0
-                      </text>
-                      <text x="176" y="58" textAnchor="middle" fill="#8b6f47" fontSize="10">
-                        100
-                      </text>
-                    </svg>
-
-                    <motion.div
-                      className={`absolute left-1/2 top-3 -translate-x-1/2 px-3 py-1 border-2 ${verdict.color} bg-black/35 font-bold tracking-[0.18em] text-[10px]`}
+                <div className="mt-6 flex items-center justify-center">
+                  <motion.div
+                    className="text-center"
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: step >= 3 ? 1 : 0.95, opacity: step >= 3 ? 1 : 0 }}
+                    transition={{ duration: 0.4, ease: "easeOut", delay: 3.1 }}
+                  >
+                    <p className="text-5xl font-bold font-mono text-[#e8dcc6]">
+                      {step >= 3 ? <CountUp value={clamp(credibilityScore, 0, 100)} duration={1.0} /> : credibilityScore}
+                      <span className="text-3xl text-[#8b6f47]">%</span>
+                    </p>
+                    <motion.p
+                      className={`mt-3 px-3 py-1 border-2 ${verdict.color} bg-black/35 font-bold tracking-[0.18em] text-xs inline-block`}
                       initial={{ scale: 0.95, opacity: 0 }}
                       animate={{ scale: step >= 3 ? [1.08, 1] : 0.95, opacity: step >= 3 ? 1 : 0 }}
                       transition={{ duration: 0.4, ease: "easeOut", delay: 4.25 }}
                     >
                       {verdict.label}
-                    </motion.div>
-                  </div>
+                    </motion.p>
+                  </motion.div>
                 </div>
 
-                <div className="mt-3">
-                  <p className="text-xs text-[#8b6f47] mb-1">SCORE</p>
-                  <p className="text-xl font-bold font-mono text-[#e8dcc6]">
-                    {step >= 3 ? <CountUp value={clamp(credibilityScore, 0, 100)} duration={1.0} /> : credibilityScore}
-                    <span className="text-[#8b6f47]">%</span>
-                  </p>
-                </div>
-
-                <div className="mt-3 min-h-[28px]">
+                <div className="mt-4 min-h-[28px]">
                   <AnimatePresence mode="wait">
                     {step >= 3 && credibilityEvents.length > 0 && (
                       <motion.p
                         key={eventsFlashIndex}
-                        className="text-xs font-mono text-[#d4af37]"
+                        className="text-xs font-mono text-[#d4af37] text-center"
                         initial={{ opacity: 0, y: 4 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}

@@ -14,6 +14,7 @@ interface GameContextType {
   buyUpgrade: (cost: number, upgradeId: string) => boolean;
   readers: number;
   credibility: number;
+  refreshGameState: () => Promise<void>;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -131,6 +132,21 @@ export function GameProvider({ children }: { children: ReactNode }) {
     return false;
   }, [treasury, purchasedUpgrades, isAuthenticated, isLoading]);
 
+  // Function to refresh game state from database
+  const refreshGameState = useCallback(async () => {
+    if (!isAuthenticated) return;
+    
+    try {
+      const state = await getGameState();
+      setTreasuryState(state.treasury);
+      setPurchasedUpgradesState(state.purchased_upgrades);
+      setReadersState(state.readers);
+      setCredibilityState(state.credibility);
+    } catch (error) {
+      console.error("Failed to refresh game state:", error);
+    }
+  }, [isAuthenticated]);
+
   return (
     <GameContext.Provider
       value={{
@@ -142,6 +158,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         buyUpgrade,
         readers,
         credibility,
+        refreshGameState,
       }}
     >
       {children}

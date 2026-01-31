@@ -144,29 +144,29 @@ export default function LeaderboardPage() {
                           : "border-[#8b6f47]"
                       } hover:border-[#d4af37] hover:shadow-lg cursor-pointer`}
                     >
-                      <div className="flex items-center gap-6">
+                      <div className="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-6">
                         {/* Rank */}
-                        <div className="flex-shrink-0 w-16 flex items-center justify-center">
+                        <div className="flex-shrink-0 w-12 md:w-16 flex items-center justify-center">
                           {getRankIcon(entry.rank)}
                         </div>
 
                         {/* Newspaper Info */}
-                        <div className="flex-1">
-                          <h3 className="text-2xl font-bold text-[#e8dcc6] font-serif mb-1">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-xl md:text-2xl font-bold text-[#e8dcc6] font-serif mb-1 truncate">
                             {entry.newspaper_name}
                           </h3>
-                          <p className="text-[#8b6f47] font-serif text-sm">
+                          <p className="text-[#8b6f47] font-serif text-xs md:text-sm truncate">
                             {entry.user_email}
                           </p>
                         </div>
 
                         {/* Stats */}
-                        <div className="flex items-center gap-6">
+                        <div className="flex flex-wrap md:flex-nowrap items-center gap-3 md:gap-6 w-full md:w-auto">
                           {/* Profit */}
-                          <div className="text-right">
+                          <div className="text-left md:text-right flex-1 md:flex-none">
                             <div className="flex items-center gap-2 text-[#d4af37]">
-                              <TrendingUp className="w-5 h-5" />
-                              <span className="text-2xl font-bold font-serif">
+                              <TrendingUp className="w-4 h-4 md:w-5 md:h-5" />
+                              <span className="text-lg md:text-2xl font-bold font-serif">
                                 {formatCurrency(entry.profit)}
                               </span>
                             </div>
@@ -174,10 +174,10 @@ export default function LeaderboardPage() {
                           </div>
 
                           {/* Readers */}
-                          <div className="text-right">
+                          <div className="text-left md:text-right flex-1 md:flex-none">
                             <div className="flex items-center gap-2 text-[#e8dcc6]">
-                              <Users className="w-5 h-5" />
-                              <span className="text-xl font-bold font-serif">
+                              <Users className="w-4 h-4 md:w-5 md:h-5" />
+                              <span className="text-base md:text-xl font-bold font-serif">
                                 {entry.readers.toLocaleString()}
                               </span>
                             </div>
@@ -185,10 +185,10 @@ export default function LeaderboardPage() {
                           </div>
 
                           {/* Credibility */}
-                          <div className="text-right">
+                          <div className="text-left md:text-right flex-1 md:flex-none">
                             <div className="flex items-center gap-2 text-[#e8dcc6]">
-                              <Star className="w-5 h-5" />
-                              <span className="text-xl font-bold font-serif">
+                              <Star className="w-4 h-4 md:w-5 md:h-5" />
+                              <span className="text-base md:text-xl font-bold font-serif">
                                 {entry.credibility.toFixed(1)}%
                               </span>
                             </div>

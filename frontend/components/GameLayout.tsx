@@ -1,12 +1,15 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Assistant from "./Assistant";
 import EditableTitle from "./EditableTitle";
-import { Loader2, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, LogOut, BookOpen, Trophy } from "lucide-react";
+import { Loader2, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, LogOut, BookOpen, Trophy, Menu } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
+import { useTutorial } from "@/context/TutorialContext";
+import { useMobile } from "@/lib/hooks/useMobile";
+import MobileDrawer from "./MobileDrawer";
 
 // Admin email - only this user can fetch new scoops
 const ADMIN_EMAIL = "lowiehartjes@gmail.com";
@@ -47,6 +50,9 @@ export default function GameLayout({
   const pathname = usePathname();
   const { newspaperName, setNewspaperName } = useGame();
   const { logout, user, isGuest } = useAuth();
+  const { handleTabClick } = useTutorial();
+  const isMobile = useMobile();
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   const displaySubtitle = subtitle || (viewMode === "map" ? "The War Room" : "Front Page Editor");
 
@@ -67,8 +73,30 @@ export default function GameLayout({
 
   return (
     <div className="flex-1 relative flex flex-col h-screen overflow-hidden">
-      {/* Header - Only show in grid mode, hide in map mode for more space */}
-      {viewMode === "grid" && (
+      {/* Mobile Header - Always visible on mobile */}
+      {isMobile && (
+        <div className="bg-[#1a0f08] bg-opacity-90 border-b border-[#8b6f47] p-3 paper-texture z-[1000] flex items-center justify-between">
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            className="p-2 rounded hover:bg-[#3a2418] text-[#8b6f47] transition-colors"
+            aria-label="Open menu"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+          <div className="flex-1 text-center">
+            <EditableTitle
+              value={newspaperName}
+              onChange={setNewspaperName}
+              className="text-lg font-bold text-[#e8dcc6] font-serif"
+            />
+            <p className="text-xs text-[#8b6f47] mt-0.5">{displaySubtitle}</p>
+          </div>
+          <div className="w-10" /> {/* Spacer for centering */}
+        </div>
+      )}
+
+      {/* Desktop Header - Only show in grid mode, hide in map mode for more space */}
+      {!isMobile && viewMode === "grid" && (
         <div className="bg-[#1a0f08] bg-opacity-90 border-b border-[#8b6f47] p-4 paper-texture z-[1000]">
           <div className="flex items-center justify-between">
             <div>
@@ -104,13 +132,25 @@ export default function GameLayout({
         </div>
       )}
 
-      {/* Content Area */}
-      <div className={`${viewMode === "map" ? "h-full" : "flex-1"} overflow-hidden flex`}>
-        {/* Main Content - Left Side */}
-        <div className="flex-1 h-full overflow-y-auto">{children}</div>
+      {/* Mobile Drawer */}
+      {isMobile && (
+        <MobileDrawer
+          isOpen={isDrawerOpen}
+          onClose={() => setIsDrawerOpen(false)}
+          onRefreshScoops={onRefreshScoops}
+          onOpenShop={onOpenShop}
+          isRefreshing={isRefreshing}
+        />
+      )}
 
-        {/* Vertical Toolbar - Right Side */}
-        <div className="w-16 bg-[#1a0f08] border-l border-[#8b6f47] flex flex-col items-center gap-4 py-4 paper-texture flex-shrink-0">
+      {/* Content Area */}
+      <div className={`${viewMode === "map" ? "h-full" : "flex-1"} overflow-hidden ${isMobile && viewMode === "map" ? "flex flex-col" : "flex"}`}>
+        {/* Main Content - Left Side */}
+        <div className={`${isMobile && viewMode === "map" ? "flex-1 flex flex-col min-h-0" : "flex-1 h-full"} ${isMobile ? "overflow-y-auto pb-safe" : "overflow-y-auto"}`}>{children}</div>
+
+        {/* Vertical Toolbar - Right Side (Desktop Only) */}
+        {!isMobile && (
+          <div className="w-16 bg-[#1a0f08] border-l border-[#8b6f47] flex flex-col items-center gap-4 py-4 paper-texture flex-shrink-0 relative z-[9999]">
           {/* Only show refresh button for admin */}
           {isAdmin && (
             <button
@@ -132,7 +172,11 @@ export default function GameLayout({
             </button>
           )}
           <button
+            data-tutorial="hub-tab"
             onClick={() => {
+              // Handle tutorial tab click
+              handleTabClick("hub-tab");
+              
               if (!isGuest) {
                 router.push("/hub");
               } else {
@@ -168,7 +212,11 @@ export default function GameLayout({
             <span className="text-[10px]">Map</span>
           </button>
           <button
+            data-tutorial="grid-tab"
             onClick={() => {
+              // Handle tutorial tab click
+              handleTabClick("grid-tab");
+              
               if (isGridActive) {
                 onViewModeChange("grid");
               } else {
@@ -213,6 +261,7 @@ export default function GameLayout({
           </button>
           {!isGuest && (
             <button
+              data-tutorial="shop-button"
               onClick={onOpenShop}
               className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"
               title="Shop"
@@ -250,6 +299,7 @@ export default function GameLayout({
             <span className="text-[10px]">{isGuest ? "Exit" : "Exit"}</span>
           </button>
         </div>
+        )}
       </div>
     </div>
   );

@@ -35,7 +35,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Check if user is already authenticated
     const authData = pb.authStore.model;
-    if (authData) {
+    if (authData && pb.authStore.token) {
+      // Always fetch fresh user data from server to ensure we have latest username
+      // This ensures username updates are visible after refresh
+      pb.collection("users").getOne(authData.id)
+        .then((freshUserData) => {
+          setUser(freshUserData);
+          // Update auth store with fresh data
+          pb.authStore.save(pb.authStore.token, freshUserData);
+        })
+        .catch((error) => {
+          console.error("Failed to refresh user data:", error);
+          // Fallback to cached data if refresh fails
+          setUser(authData);
+        });
+    } else {
       setUser(authData);
     }
     setIsLoading(false);
@@ -133,7 +147,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // Refresh user data from PocketBase
       const updatedUser = await pb.collection("users").getOne(user.id);
+      
+      // Update both local state and PocketBase auth store
       setUser(updatedUser);
+      
+      // Update PocketBase auth store so it persists across refreshes
+      if (pb.authStore.token && pb.authStore.model) {
+        // Save the updated user data to auth store
+        pb.authStore.save(pb.authStore.token, updatedUser);
+      }
     } catch (error: any) {
       throw new Error(error.message || "Failed to update username");
     }

@@ -291,13 +291,15 @@ Primary country/region:"""
         
         prompt = f"""You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content.
 
-Given the following news article, create THREE distinct variants of the same story.
+Given the following news article, create THREE DISTINCTLY DIFFERENT variants of the same story.
 
 CRITICAL REQUIREMENT: You MUST provide ALL THREE variants. The JSON response MUST contain exactly these keys: "factual", "sensationalist", "propaganda". Each variant must be 50-100 words.
 
-1. FACTUAL: Write a dry, boring, objective news report. Just the facts. No emotion. (50-100 words)
-2. SENSATIONALIST: Write a fear-mongering, clickbait version. Make it dramatic and alarming. Use exclamation marks and urgent language. (50-100 words)
-3. PROPAGANDA: Write a version that praises the government/institutions. Make it positive and supportive. Emphasize progress and success. (50-100 words)
+IMPORTANT: Each variant MUST be UNIQUE and DIFFERENT from the others. They should have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants.
+
+1. FACTUAL: Write a dry, boring, objective news report. Just the facts. No emotion. Use neutral language. (50-100 words)
+2. SENSATIONALIST: Write a fear-mongering, clickbait version. Make it dramatic and alarming. Use exclamation marks, urgent language, and emotional words like "shocking", "devastating", "terrifying". (50-100 words)
+3. PROPAGANDA: Write a version that praises the government/institutions. Make it positive and supportive. Emphasize progress, success, and official responses. Use words like "authorities", "officials", "successful", "effective". (50-100 words)
 
 Additionally, extract:
 - TOPIC_TAGS: List of topic tags (e.g., ["WAR", "TECH", "ECONOMY", "POLITICS", "CLIMATE", "HEALTH"])
@@ -305,7 +307,7 @@ Additionally, extract:
 - LOCATION_CITY: The primary city mentioned in the article (or "Unknown" if none)
 - COUNTRY_CODE: The ISO 3166-1 alpha-2 country code (e.g., "US", "NL", "JP", "GB", "GLOBAL", or "XX" if unknown)
 - ASSISTANT_COMMENT: A short, cynical QUESTION (1 sentence, max 15 words) from your perspective as a profit-driven editor. You MUST read and understand the specific article content. Ask a relevant question that references specific details, people, places, or events mentioned in the article. The question should be cynical and focused on circulation/impact, NOT generic. Focus on: What angle will sell, who will be affected, what's the real story behind this, or what's the political/economic fallout. NEVER provide moral lessons, ethical guidance, or lectures on societal values. NEVER mention 'journalistic integrity', 'consent', or 'supporting victims' in a sincere way. Do NOT judge potential choices. Be cynical and focused on circulation.
-- AUDIENCE_SCORES: Analyze how this story will be received by 8 distinct factions. Assign a score from -10 to +10 for EACH faction based on how they would react to this story. A story can be good for one faction (+8) but bad for another (-5). The 8 factions are:
+- AUDIENCE_SCORES: Analyze how EACH VARIANT of this story will be received by 8 distinct factions. Each variant (factual, sensationalist, propaganda) will have DIFFERENT impacts on each faction. Assign a score from -10 to +10 for EACH faction for EACH variant based on how they would react to that specific variant. The 8 factions are:
   * elite: Wealthy, pro-business, anti-tax. They like: tax cuts, deregulation, corporate success, economic growth. They dislike: wealth redistribution, regulation, anti-business sentiment.
   * working_class: Pro-jobs, anti-automation, wants cheap entertainment. They like: job creation, worker rights, affordable goods, entertainment. They dislike: automation, job loss, expensive necessities, elitism.
   * patriots: Pro-military/police, anti-foreigner, loyal to the State. They like: military strength, law enforcement, national security, traditional values. They dislike: criticism of military/police, immigration, anti-government sentiment.
@@ -315,7 +317,12 @@ Additionally, extract:
   * resistance: Anti-government, pro-truth/freedom. They like: government corruption exposed, truth, freedom, whistleblowing. They dislike: propaganda, government praise, censorship, authoritarianism.
   * doomers: Paranoid preppers, love bad news and collapse theories. They like: disasters, collapse scenarios, bad news, warnings of doom. They dislike: positive news, optimism, "everything is fine" narratives.
   
-  Return an object with all 8 keys, each with an integer score from -10 to +10.
+  IMPORTANT: Each variant will have different impacts:
+  - FACTUAL: Neutral, objective reporting. Generally neutral scores, but some factions may prefer truth (resistance +, patriots - if critical).
+  - SENSATIONALIST: Dramatic, fear-mongering. Doomers and syndicate may like it more (+), elite and technocrats may dislike it (-).
+  - PROPAGANDA: Pro-government, positive spin. Patriots and elite may like it (+), resistance and doomers may strongly dislike it (-).
+  
+  Return an object with three keys (factual, sensationalist, propaganda), each containing an object with all 8 faction keys, each with an integer score from -10 to +10.
 
 CRITICAL: The comment MUST be a QUESTION that references SPECIFIC details from the article (names, places, events, numbers, etc.). Do NOT use generic questions like "Will this sell?" or "What's the angle here?" - make it specific to THIS article.
 
@@ -347,14 +354,36 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
     "country_code": "XX",
     "assistant_comment": "One cynical QUESTION (max 15 words) referencing specific article details, focused on profit/circulation/impact",
     "audience_scores": {{
-        "elite": 0,
-        "working_class": 0,
-        "patriots": 0,
-        "syndicate": 0,
-        "technocrats": 0,
-        "faithful": 0,
-        "resistance": 0,
-        "doomers": 0
+        "factual": {{
+            "elite": 0,
+            "working_class": 0,
+            "patriots": 0,
+            "syndicate": 0,
+            "technocrats": 0,
+            "faithful": 0,
+            "resistance": 0,
+            "doomers": 0
+        }},
+        "sensationalist": {{
+            "elite": 0,
+            "working_class": 0,
+            "patriots": 0,
+            "syndicate": 0,
+            "technocrats": 0,
+            "faithful": 0,
+            "resistance": 0,
+            "doomers": 0
+        }},
+        "propaganda": {{
+            "elite": 0,
+            "working_class": 0,
+            "patriots": 0,
+            "syndicate": 0,
+            "technocrats": 0,
+            "faithful": 0,
+            "resistance": 0,
+            "doomers": 0
+        }}
     }}
 }}"""
         
@@ -364,7 +393,7 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must not be empty. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with all 8 keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each value must be an integer from -10 to +10 representing how that faction would react to this story."
+                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. CRITICAL: All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must be UNIQUE and DIFFERENT from each other. Each variant must have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with three keys: 'factual', 'sensationalist', 'propaganda'. Each variant key must contain an object with all 8 faction keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each faction value must be an integer from -10 to +10 representing how that faction would react to that specific variant of the story."
                     },
                     {
                         "role": "user",
@@ -395,13 +424,35 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
             result = None
             json_errors = []
             
-            # Strategy 1: Try to find JSON object with regex
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result_text, re.DOTALL)
-            if json_match:
-                try:
-                    result = json.loads(json_match.group())
-                except json.JSONDecodeError as e:
-                    json_errors.append(f"Regex match failed: {e}")
+            # Strategy 1: Try to find JSON object with regex (improved to handle nested objects)
+            # Match from first { to last } (handling nested braces)
+            brace_count = 0
+            start_idx = result_text.find('{')
+            if start_idx != -1:
+                end_idx = start_idx
+                for i in range(start_idx, len(result_text)):
+                    if result_text[i] == '{':
+                        brace_count += 1
+                    elif result_text[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end_idx = i + 1
+                            break
+                if end_idx > start_idx:
+                    json_str = result_text[start_idx:end_idx]
+                    try:
+                        result = json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        json_errors.append(f"Brace matching failed: {e}")
+            
+            # Fallback: Try original regex approach
+            if result is None:
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', result_text, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group())
+                    except json.JSONDecodeError as e:
+                        json_errors.append(f"Regex match failed: {e}")
             
             # Strategy 2: Try parsing the whole response
             if result is None:
@@ -427,9 +478,11 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
             if result is None:
                 try:
                     # Extract fields using regex as last resort
-                    factual_match = re.search(r'"factual"\s*:\s*"([^"]*)"', result_text, re.DOTALL)
-                    sensationalist_match = re.search(r'"sensationalist"\s*:\s*"([^"]*)"', result_text, re.DOTALL)
-                    propaganda_match = re.search(r'"propaganda"\s*:\s*"([^"]*)"', result_text, re.DOTALL)
+                    # Use non-greedy matching with DOTALL to handle multiline strings
+                    # Match until we find the closing quote (handling escaped quotes)
+                    factual_match = re.search(r'"factual"\s*:\s*"((?:[^"\\]|\\.)*)"', result_text, re.DOTALL)
+                    sensationalist_match = re.search(r'"sensationalist"\s*:\s*"((?:[^"\\]|\\.)*)"', result_text, re.DOTALL)
+                    propaganda_match = re.search(r'"propaganda"\s*:\s*"((?:[^"\\]|\\.)*)"', result_text, re.DOTALL)
                     tags_match = re.search(r'"tags"\s*:\s*\[(.*?)\]', result_text, re.DOTALL)
                     sentiment_match = re.search(r'"sentiment"\s*:\s*"([^"]*)"', result_text)
                     location_match = re.search(r'"location_city"\s*:\s*"([^"]*)"', result_text)
@@ -440,11 +493,20 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                     
                     result = {}
                     if factual_match:
-                        result["factual"] = factual_match.group(1)
+                        factual_text = factual_match.group(1)
+                        # Unescape JSON string (handle \\n, \\", etc.)
+                        factual_text = factual_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                        result["factual"] = factual_text
                     if sensationalist_match:
-                        result["sensationalist"] = sensationalist_match.group(1)
+                        sensationalist_text = sensationalist_match.group(1)
+                        # Unescape JSON string
+                        sensationalist_text = sensationalist_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                        result["sensationalist"] = sensationalist_text
                     if propaganda_match:
-                        result["propaganda"] = propaganda_match.group(1)
+                        propaganda_text = propaganda_match.group(1)
+                        # Unescape JSON string
+                        propaganda_text = propaganda_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                        result["propaganda"] = propaganda_text
                     if tags_match:
                         # Try to parse tags array
                         try:
@@ -476,21 +538,54 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 sensationalist = result.get("sensationalist", "").strip()
                 propaganda = result.get("propaganda", "").strip()
                 
+                # Debug: Log variant lengths and first 50 chars to see if they're different
+                print(f"DEBUG: Article '{title[:50]}...' variants:")
+                print(f"  Factual length: {len(factual)}, preview: {factual[:50]}...")
+                print(f"  Sensationalist length: {len(sensationalist)}, preview: {sensationalist[:50]}...")
+                print(f"  Propaganda length: {len(propaganda)}, preview: {propaganda[:50]}...")
+                
+                # Check if variants are identical (which shouldn't happen)
+                # If they are, we need to regenerate or use fallbacks
+                variants_identical = False
+                if factual and sensationalist and factual.strip() == sensationalist.strip():
+                    print(f"ERROR: Factual and Sensationalist variants are IDENTICAL for article '{title[:50]}...'")
+                    variants_identical = True
+                if factual and propaganda and factual.strip() == propaganda.strip():
+                    print(f"ERROR: Factual and Propaganda variants are IDENTICAL for article '{title[:50]}...'")
+                    variants_identical = True
+                if sensationalist and propaganda and sensationalist.strip() == propaganda.strip():
+                    print(f"ERROR: Sensationalist and Propaganda variants are IDENTICAL for article '{title[:50]}...'")
+                    variants_identical = True
+                
+                # If variants are identical, regenerate them with different fallbacks
+                if variants_identical and factual:
+                    print(f"WARNING: Regenerating variants because they are identical")
+                    # Use the factual as base but modify for other variants
+                    base_text = factual.strip()
+                    if not sensationalist or sensationalist.strip() == factual.strip():
+                        # Create a more dramatic version
+                        sensationalist = f"BREAKING: {base_text[:50]}... SHOCKING DEVELOPMENT! This dramatic turn of events has sent shockwaves through the community. Details are still emerging, but sources confirm this is a major story that will have far-reaching consequences."
+                    if not propaganda or propaganda.strip() == factual.strip():
+                        # Create a more positive/government-friendly version
+                        propaganda = f"Official Statement: {base_text[:50]}... Authorities are working diligently to address this matter. Officials have confirmed that proper protocols are being followed and the situation is under control. The government is committed to transparency and public safety."
+                
                 # Safety Net: Ensure all three variants exist
                 # If factual is missing or empty, use original content
                 if not factual:
                     factual = fallback_content
                     print(f"Warning: 'factual' variant missing for article '{title[:50]}...', using fallback")
                 
-                # If sensationalist is missing or empty, use factual as fallback
+                # If sensationalist is missing or empty, DON'T use factual - generate a different version
                 if not sensationalist:
-                    sensationalist = factual
-                    print(f"Warning: 'sensationalist' variant missing for article '{title[:50]}...', using factual as fallback")
+                    print(f"Warning: 'sensationalist' variant missing for article '{title[:50]}...', generating fallback")
+                    # Create a more dramatic version as fallback
+                    sensationalist = f"BREAKING: {factual[:50]}... [DRAMATIC UPDATE] This shocking development has sent shockwaves through the community!"
                 
-                # If propaganda is missing or empty, use factual as fallback
+                # If propaganda is missing or empty, DON'T use factual - generate a different version
                 if not propaganda:
-                    propaganda = factual
-                    print(f"Warning: 'propaganda' variant missing for article '{title[:50]}...', using factual as fallback")
+                    print(f"Warning: 'propaganda' variant missing for article '{title[:50]}...', generating fallback")
+                    # Create a more positive/government-friendly version as fallback
+                    propaganda = f"Official Report: {factual[:50]}... [POSITIVE SPIN] Authorities are working diligently to address this matter and ensure public safety."
                 
                 # Build processed_variants - guaranteed to have all three
                 processed_variants = {
@@ -530,23 +625,33 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 if not assistant_comment or assistant_comment == "":
                     assistant_comment = "This looks like a solid lead."
                 
-                # Validate audience_scores
+                # Validate audience_scores (now per variant)
                 audience_scores = result.get("audience_scores", {})
                 if not isinstance(audience_scores, dict):
                     audience_scores = {}
                 
-                # Ensure all 8 factions are present with valid scores (-10 to 10)
+                # Ensure all 3 variants are present with valid scores
+                required_variants = ["factual", "sensationalist", "propaganda"]
                 required_factions = ["elite", "working_class", "patriots", "syndicate", "technocrats", "faithful", "resistance", "doomers"]
                 validated_scores = {}
-                for faction in required_factions:
-                    score = audience_scores.get(faction, 0)
-                    try:
-                        score = int(score)
-                        # Clamp to -10 to 10 range
-                        score = max(-10, min(10, score))
-                    except (ValueError, TypeError):
-                        score = 0
-                    validated_scores[faction] = score
+                
+                for variant in required_variants:
+                    variant_scores = audience_scores.get(variant, {})
+                    if not isinstance(variant_scores, dict):
+                        variant_scores = {}
+                    
+                    validated_variant_scores = {}
+                    for faction in required_factions:
+                        score = variant_scores.get(faction, 0)
+                        try:
+                            score = int(score)
+                            # Clamp to -10 to 10 range
+                            score = max(-10, min(10, score))
+                        except (ValueError, TypeError):
+                            score = 0
+                        validated_variant_scores[faction] = score
+                    
+                    validated_scores[variant] = validated_variant_scores
                 
                 # Final validation: ensure all three variants are present and non-empty
                 assert "factual" in processed_variants and processed_variants["factual"], "factual variant must exist"

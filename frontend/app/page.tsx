@@ -14,7 +14,7 @@ import {
   closestCenter,
 } from "@dnd-kit/core";
 import type { DailyEdition, Article } from "@/types/api";
-import { fetchLatestArticles, resetAndIngest } from "@/lib/api";
+import { fetchLatestArticles, resetAndIngestWithPolling } from "@/lib/api";
 import Wire from "@/components/Wire";
 import GameLayout from "@/components/GameLayout";
 import Assistant from "@/components/Assistant";
@@ -22,6 +22,7 @@ import { Loader2, AlertCircle } from "lucide-react";
 import ShopModal from "@/components/ShopModal";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
+import { useMobile } from "@/lib/hooks/useMobile";
 import toast from "react-hot-toast";
 
 // Dynamically import Map to avoid SSR issues with Leaflet
@@ -39,6 +40,7 @@ type ViewMode = "map" | "grid";
 export default function Home() {
   const router = useRouter();
   const { isGuest } = useAuth();
+  const isMobile = useMobile();
   const [dailyEdition, setDailyEdition] = useState<DailyEdition | null>(null);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [assistantMessage, setAssistantMessage] = useState<string | undefined>(undefined);
@@ -187,14 +189,10 @@ export default function Home() {
       // Small delay to show the first message
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      setRefreshProgress("Fetching new articles from RSS feed...");
-      const result = await resetAndIngest();
-      
-      setRefreshProgress("Processing articles with AI...");
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setRefreshProgress("Geocoding locations...");
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Use async job with polling for better progress tracking
+      await resetAndIngestWithPolling((progress, status) => {
+        setRefreshProgress(progress || "Processing...");
+      });
       
       setRefreshProgress("Loading new scoops...");
       await reloadLatest();
@@ -284,9 +282,10 @@ export default function Home() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="h-screen flex overflow-hidden bg-[#2a1810]">
-        {/* Left Panel - The Wire */}
-        <div className="h-full flex flex-col bg-[#1a0f08] border-r-2 border-[#8b6f47] paper-texture overflow-hidden flex-shrink-0 w-80">
+        <div className={`h-screen flex ${isMobile ? "flex-col" : ""} overflow-hidden bg-[#2a1810]`}>
+        {/* Left Panel - The Wire (Desktop Only) */}
+        {!isMobile && (
+          <div className="h-full flex flex-col bg-[#1a0f08] border-r-2 border-[#8b6f47] paper-texture overflow-hidden flex-shrink-0 w-80 relative z-10">
           {/* Header with Assistant */}
           <div className="bg-[#2a1810] border-b border-[#8b6f47] p-4 flex-shrink-0">
             <div className="mb-3">
@@ -304,7 +303,7 @@ export default function Home() {
           </div>
 
           {/* Wire Content */}
-          <div className="flex-1 overflow-y-auto">
+          <div data-tutorial="wire" className="flex-1 overflow-y-auto">
             <Wire
               articles={availableArticles}
               selectedArticleId={selectedArticleId}
@@ -314,9 +313,10 @@ export default function Home() {
             />
           </div>
         </div>
+        )}
 
         {/* Main Content Area with GameLayout */}
-        <div className="flex-1 relative">
+        <div className={`${isMobile ? "flex-1 flex flex-col" : "flex-1"} relative`}>
           {/* Progress Overlay */}
           {isRefreshing && (
             <div className="absolute inset-0 bg-[#1a0f08] bg-opacity-95 z-[2000] flex items-center justify-center paper-texture">
@@ -367,14 +367,59 @@ export default function Home() {
               globalMood: dailyEdition.global_mood,
             }}
           >
-            {viewMode === "map" && (
-              <div className="w-full h-full map-ocean-bg">
+            {/* Map container - always render for tutorial, even if viewMode changes */}
+            <div 
+              data-tutorial="map"
+              className={`w-full ${isMobile ? "flex-1 min-h-0" : "h-full"} map-ocean-bg relative ${viewMode !== "map" ? "hidden" : ""}`}
+            >
+              {viewMode === "map" && (
                 <Map
                   articles={dailyEdition?.articles || []}
                   selectedArticleId={selectedArticleId}
                   onArticleSelect={handleArticleSelect}
                 />
-              </div>
+              )}
+            </div>
+            
+            {viewMode === "map" && (
+              <>
+                
+                {/* Mobile Scoop Carousel - Bottom of screen */}
+                {isMobile && (
+                  <div className="h-64 bg-[#1a0f08] border-t-2 border-[#8b6f47] paper-texture flex-shrink-0 overflow-hidden">
+                    <div className="h-full overflow-x-auto overflow-y-hidden scrollbar-hide" style={{ scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}>
+                      <div className="flex gap-4 px-4 py-4 h-full" style={{ scrollSnapType: "x mandatory" }}>
+                        {availableArticles.map((article) => (
+                          <div
+                            key={article.id}
+                            onClick={() => handleArticleSelect(article.id)}
+                            className={`flex-shrink-0 w-72 bg-[#3a2418] border border-[#8b6f47] rounded-lg p-4 cursor-pointer transition-all ${
+                              selectedArticleId === article.id
+                                ? "border-[#d4af37] bg-[#4a3020] shadow-lg"
+                                : "hover:border-[#d4af37] hover:bg-[#4a3020]"
+                            }`}
+                            style={{ scrollSnapAlign: "start" }}
+                          >
+                            <h3 className="text-base font-bold text-[#e8dcc6] font-serif mb-2 line-clamp-2">
+                              {article.original_title}
+                            </h3>
+                            {article.location_city && (
+                              <p className="text-xs text-[#8b6f47] mb-1">
+                                📍 {article.location_city}
+                              </p>
+                            )}
+                            {article.assistant_comment && (
+                              <p className="text-xs text-[#d4af37] italic mt-2 line-clamp-2">
+                                "{article.assistant_comment}"
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </GameLayout>
         </div>

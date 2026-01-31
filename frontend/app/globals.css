@@ -23,6 +23,46 @@ body {
   overflow: hidden;
 }
 
+/* Mobile viewport height fix - use dvh (dynamic viewport height) for mobile */
+/* This accounts for mobile browser UI (address bar, navigation bar) */
+@supports (height: 100dvh) {
+  .h-screen {
+    height: 100dvh;
+  }
+  
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+  
+  .w-screen {
+    width: 100dvw;
+  }
+}
+
+/* Fallback for browsers that don't support dvh */
+@supports not (height: 100dvh) {
+  @media (max-width: 768px) {
+    .h-screen {
+      height: 100vh;
+      height: -webkit-fill-available; /* iOS Safari */
+    }
+    
+    .min-h-screen {
+      min-height: 100vh;
+      min-height: -webkit-fill-available; /* iOS Safari */
+    }
+  }
+}
+
+/* Safe area padding for mobile devices (notches, home indicators) */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
 /* Retro-Noir Paper Effect */
 .paper-texture {
   background-image: 
@@ -69,6 +109,16 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 111, 71, 0.8);
+}
+
+/* Hide scrollbar for mobile carousel */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari, Opera */
 }
 
 /* Shake animation for talking avatar */

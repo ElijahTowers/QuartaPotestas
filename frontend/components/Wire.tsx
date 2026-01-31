@@ -12,22 +12,25 @@ interface WireProps {
   onArticleSelect: (articleId: string | number) => void;
   viewMode: "map" | "grid";
   showHeader?: boolean; // Optional prop to show/hide header
+  paperSentToday?: boolean; // Disable dragging when paper has been sent today
 }
 
 function DraggableArticleItem({ 
   article, 
   isSelected, 
   onSelect,
-  viewMode 
+  viewMode,
+  paperSentToday = false
 }: { 
   article: Article; 
   isSelected: boolean; 
   onSelect: () => void;
   viewMode: "map" | "grid";
+  paperSentToday?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `article-${article.id}`,
-    disabled: viewMode === "map", // Disable dragging in map mode
+    disabled: viewMode === "map" || paperSentToday, // Disable dragging in map mode or when paper sent today
   });
 
   const style = transform
@@ -116,7 +119,7 @@ function DraggableArticleItem({
   );
 }
 
-export default function Wire({ articles, selectedArticleId, onArticleSelect, viewMode, showHeader = true }: WireProps) {
+export default function Wire({ articles, selectedArticleId, onArticleSelect, viewMode, showHeader = true, paperSentToday = false }: WireProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
   const filteredArticles = articles.filter((article) =>
@@ -166,6 +169,7 @@ export default function Wire({ articles, selectedArticleId, onArticleSelect, vie
                   isSelected={isSelected}
                   onSelect={() => onArticleSelect(article.id)}
                   viewMode={viewMode}
+                  paperSentToday={paperSentToday}
                 />
               );
             })}

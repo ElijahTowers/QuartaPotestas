@@ -128,6 +128,7 @@ class PublicEditionResponse(BaseModel):
     published_at: str
     stats: Dict[str, Any]
     published_items: List[PublicPublishedItem]
+    username: Optional[str] = None
 
 
 @router.post("", response_model=PublishedEditionResponse)
@@ -174,9 +175,18 @@ async def publish_edition(
         # Create record in PocketBase
         published_edition = await pb_client.create_record("published_editions", edition_data)
         
-        # Update user's game state (readers and credibility) from published edition stats
+        # Update user's game state (readers, credibility, and treasury) from published edition stats
         if published_edition:
             try:
+                # Get current user record to get existing treasury
+                user_record = await pb_client.get_record_by_id("users", user_id)
+                current_treasury = 0.0
+                if user_record:
+                    current_treasury = float(user_record.get("treasury", 0.0) or 0.0)
+                
+                # Treasury is cumulative: add cash from this edition to existing treasury
+                new_treasury = current_treasury + request.stats.cash
+                
                 # Update user record with latest stats
                 await pb_client.update_record(
                     "users",
@@ -184,6 +194,7 @@ async def publish_edition(
                     {
                         "readers": request.stats.readers,
                         "credibility": request.stats.credibility,
+                        "treasury": new_treasury,  # Cumulative treasury
                     }
                 )
             except Exception as e:
@@ -493,6 +504,17 @@ async def get_public_edition(edition_id: str):
                     location=None,
                 ))
 
+        # Get username from user record
+        username = None
+        user_id = edition.get("user", "")
+        if user_id:
+            try:
+                user_record = await pb_client.get_record_by_id("users", user_id)
+                if user_record:
+                    username = user_record.get("username", None)
+            except Exception:
+                pass  # If user not found or username not available, use None
+
         return PublicEditionResponse(
             id=edition.get("id", ""),
             newspaper_name=edition.get("newspaper_name") or "Untitled Edition",
@@ -500,6 +522,7 @@ async def get_public_edition(edition_id: str):
             published_at=format_datetime_dutch(edition.get("published_at", "")),
             stats=stats if isinstance(stats, dict) else {},
             published_items=published_items,
+            username=username,
         )
     except HTTPException:
         raise
@@ -507,75 +530,130 @@ async def get_public_edition(edition_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch public edition: {str(e)}")
 
 
-@router.get("/{edition_id}", response_model=PublishedEditionResponse)
-async def get_published_edition(
-    edition_id: str,
+# IMPORTANT: This route must be defined BEFORE any /{edition_id} routes
+# to prevent FastAPI from matching "audience-impact" as an edition_id
+@router.get("/audience-impact", response_model=Dict[str, int])
+async def get_audience_impact(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get a specific published edition by ID.
+    Calculate total audience impact from all published editions.
+    Aggregates audience scores from all articles in published editions,
+    using the variant that was actually published for each article.
     
-    Requires authentication. Users can only access their own editions.
+    Requires authentication.
     """
-    user_id = current_user.get("id")
-    if not user_id:
-        raise HTTPException(
-            status_code=401,
-            detail="User ID not found in authentication token"
-        )
-    
     try:
         pb_client = await get_pb_client()
+        user_id = current_user.get("id")
         
-        # Get the edition
-        edition = await pb_client.get_record_by_id("published_editions", edition_id)
-        
-        if not edition:
+        if not user_id:
             raise HTTPException(
-                status_code=404,
-                detail="Published edition not found"
+                status_code=401,
+                detail="User ID not found in authentication token"
             )
         
-        # Check if user owns this edition
-        if edition.get("user") != user_id:
-            raise HTTPException(
-                status_code=403,
-                detail="You can only access your own published editions"
-            )
+        # Initialize faction totals
+        faction_totals = {
+            "elite": 0,
+            "working_class": 0,
+            "patriots": 0,
+            "syndicate": 0,
+            "technocrats": 0,
+            "faithful": 0,
+            "resistance": 0,
+            "doomers": 0,
+        }
         
-        # Parse JSON fields
-        grid_layout = edition.get("grid_layout", "{}")
-        stats = edition.get("stats", "{}")
-        
-        if isinstance(grid_layout, str):
-            try:
-                grid_layout = json.loads(grid_layout)
-            except:
-                grid_layout = {}
-        
-        if isinstance(stats, str):
-            try:
-                stats = json.loads(stats)
-            except:
-                stats = {}
-        
-        return PublishedEditionResponse(
-            id=edition.get("id", ""),
-            user=edition.get("user", user_id),
-            date=format_date_dutch(edition.get("date", "")),
-            newspaper_name=edition.get("newspaper_name"),
-            grid_layout=grid_layout,
-            stats=stats,
-            published_at=format_datetime_dutch(edition.get("published_at")),
-            created=format_datetime_dutch(edition.get("created")),
-            updated=format_datetime_dutch(edition.get("updated")),
+        # Get all published editions for this user
+        editions = await pb_client.get_list(
+            "published_editions",
+            filter=f'user="{user_id}"',
+            per_page=500,
+            sort="-published_at",
         )
+        
+        # Process each edition
+        for edition in editions:
+            # Parse grid_layout
+            grid_layout = edition.get("grid_layout", {})
+            if isinstance(grid_layout, str):
+                try:
+                    grid_layout = json.loads(grid_layout)
+                except:
+                    grid_layout = {}
+            
+            # Get placed items
+            placed_items = []
+            if isinstance(grid_layout, dict):
+                placed_items = grid_layout.get("placedItems", [])
+            elif isinstance(grid_layout, list):
+                placed_items = grid_layout
+            
+            # Process each placed item
+            for item in placed_items:
+                if not isinstance(item, dict):
+                    continue
+                
+                # Skip ads (they don't have audience scores)
+                if item.get("isAd"):
+                    continue
+                
+                # Get article ID and variant
+                article_id = item.get("articleId")
+                variant = item.get("variant")
+                
+                if not article_id or not variant:
+                    continue
+                
+                # Validate variant
+                if variant not in ["factual", "sensationalist", "propaganda"]:
+                    continue
+                
+                # Fetch the article to get its audience scores
+                try:
+                    article = await pb_client.get_record_by_id("articles", article_id)
+                    if not article:
+                        continue
+                    
+                    # Parse audience_scores
+                    audience_scores = article.get("audience_scores", {})
+                    if isinstance(audience_scores, str):
+                        try:
+                            audience_scores = json.loads(audience_scores)
+                        except:
+                            continue
+                    
+                    if not isinstance(audience_scores, dict):
+                        continue
+                    
+                    # Get scores for the published variant
+                    variant_scores = audience_scores.get(variant, {})
+                    if not isinstance(variant_scores, dict):
+                        continue
+                    
+                    # Add scores to totals
+                    for faction in faction_totals.keys():
+                        score = variant_scores.get(faction, 0)
+                        try:
+                            score = int(score)
+                            faction_totals[faction] += score
+                        except (ValueError, TypeError):
+                            pass
+                            
+                except Exception as e:
+                    # Skip articles that can't be fetched
+                    print(f"Warning: Could not fetch article {article_id}: {e}")
+                    continue
+        
+        return faction_totals
+        
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch published edition: {str(e)}"
+            detail=f"Failed to calculate audience impact: {str(e)}"
         )
 
 

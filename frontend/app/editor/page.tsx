@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import {
@@ -16,12 +16,17 @@ import {
 import { useDroppable } from "@dnd-kit/core";
 import { useDraggable } from "@dnd-kit/core";
 import type { DailyEdition, Article } from "@/types/api";
-import { fetchLatestArticles, fetchAds, resetAndIngest, publish, type Ad, type PublishStats } from "@/lib/api";
+import { fetchLatestArticles, fetchAds, resetAndIngestWithPolling, publish, type Ad, type PublishStats, hasPublishedToday, getYesterdayEdition, getDayBeforeYesterdayEdition, getRecentTransactions, type PublishedEditionResponse } from "@/lib/api";
 import Wire from "@/components/Wire";
 import Assistant from "@/components/Assistant";
 import ShopModal from "@/components/ShopModal";
 import MorningReport from "@/components/MorningReport";
-import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, Trophy, BookOpen } from "lucide-react";
+import PaperSentPopup from "@/components/PaperSentPopup";
+import NewspaperAnimation from "@/components/NewspaperAnimation";
+import ContentSelectionModal from "@/components/ContentSelectionModal";
+import MobileDrawer from "@/components/MobileDrawer";
+import { useMobile } from "@/lib/hooks/useMobile";
+import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, Trophy, BookOpen, Menu, Printer, Calendar } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
 import toast from "react-hot-toast";
@@ -109,6 +114,7 @@ function SubLeadArticle({
           </button>
           <div className="relative">
             <button
+              data-tutorial="variant-selector"
               onClick={() => setShowVariantMenu(!showVariantMenu)}
               className="text-[#e8dcc6] hover:text-[#d4af37] text-xs px-2 py-1 border border-[#8b6f47] rounded flex items-center gap-1"
             >
@@ -220,6 +226,7 @@ function SidebarArticle({
           </button>
           <div className="relative">
             <button
+              data-tutorial="variant-selector"
               onClick={() => setShowVariantMenu(!showVariantMenu)}
               className="text-[#e8dcc6] hover:text-[#d4af37] text-xs px-2 py-1 border border-[#8b6f47] rounded flex items-center gap-1"
             >
@@ -322,6 +329,7 @@ function NewspaperArticle({
           {/* Variant Selector */}
           <div className="relative">
             <button
+              data-tutorial="variant-selector"
               onClick={() => setShowVariantMenu(!showVariantMenu)}
               className="text-[#e8dcc6] hover:text-[#d4af37] text-xs px-2 py-1 border border-[#8b6f47] rounded flex items-center gap-1"
             >
@@ -381,9 +389,10 @@ function NewspaperArticle({
 }
 
 // Draggable Ad Card Component
-function DraggableAdCard({ ad }: { ad: Ad }) {
+function DraggableAdCard({ ad, paperSentToday = false }: { ad: Ad; paperSentToday?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `ad-${ad.id}`,
+    disabled: paperSentToday, // Disable dragging when paper sent today
   });
 
   const style = transform
@@ -436,12 +445,16 @@ function DroppableZone({
   children,
   className,
   isEmpty,
+  onTap,
+  isMobile,
 }: {
   zoneId: string;
   zoneType: ZoneType;
   children: React.ReactNode;
   className?: string;
   isEmpty?: boolean;
+  onTap?: () => void;
+  isMobile?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: zoneId,
@@ -452,12 +465,13 @@ function DroppableZone({
   return (
     <div
       ref={setNodeRef}
-      className={`${className || ""} ${isOver ? "bg-[#f0e6d2] border-2 border-[#d4af37] border-dashed" : ""} min-h-[200px] transition-colors`}
+      className={`${className || ""} ${isOver ? "bg-[#f0e6d2] border-2 border-[#d4af37] border-dashed" : ""} min-h-[200px] transition-colors ${isMobile && isEmpty ? "cursor-pointer active:bg-[#f0e6d2]" : ""}`}
+      onClick={isMobile && isEmpty && onTap ? onTap : undefined}
     >
       {children}
       {(isEmpty || (!hasContent && isEmpty !== false)) && (
-        <div className="text-center text-[#999] text-sm py-8 italic">
-          Drop article or ad here
+        <div className={`text-center text-[#999] text-sm py-8 italic ${isMobile ? "py-12 text-base" : ""}`}>
+          {isMobile ? "Tap to add content" : "Drop article or ad here"}
         </div>
       )}
     </div>
@@ -472,6 +486,9 @@ function RowAd({
   onDelete,
   dragId,
   size = "medium",
+  isMobile,
+  onReplace,
+  zoneId,
 }: {
   ad: Ad;
   rowIndex: number;
@@ -479,6 +496,9 @@ function RowAd({
   onDelete: () => void;
   dragId: string;
   size?: "large" | "medium" | "small";
+  isMobile?: boolean;
+  onReplace?: (zoneId: string) => void;
+  zoneId?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: dragId,
@@ -512,26 +532,44 @@ function RowAd({
       ref={setNodeRef}
       style={style}
       className="relative border-4 border-[#1a1a1a] p-4 bg-[#f9f9f9] mb-4 group"
-      onMouseEnter={() => setShowControls(true)}
-      onMouseLeave={() => setShowControls(false)}
+      onMouseEnter={() => !isMobile && setShowControls(true)}
+      onMouseLeave={() => !isMobile && setShowControls(false)}
+      onTouchStart={() => isMobile && setShowControls(true)}
     >
       {/* Control Bar */}
-      {showControls && (
-        <div className="absolute -top-6 right-0 flex items-center gap-2 bg-[#1a0f08] border border-[#8b6f47] rounded px-2 py-1 z-10">
+      {(showControls || isMobile) && (
+        <div className="absolute -top-6 right-0 flex items-center gap-1 md:gap-2 bg-[#1a0f08] border border-[#8b6f47] rounded px-1 md:px-2 py-1 z-10">
+          {!isMobile && (
+            <button
+              {...attributes}
+              {...listeners}
+              className="text-[#e8dcc6] hover:text-[#d4af37] cursor-grab active:cursor-grabbing"
+              title="Drag to move"
+            >
+              <GripVertical className="w-3 h-3" />
+            </button>
+          )}
+          {isMobile && onReplace && zoneId && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onReplace(zoneId);
+              }}
+              className="text-[#d4af37] hover:text-[#e5c04a] text-xs px-1 md:px-2"
+              title="Replace ad"
+            >
+              <span className="text-[10px] md:text-xs">Replace</span>
+            </button>
+          )}
           <button
-            {...attributes}
-            {...listeners}
-            className="text-[#e8dcc6] hover:text-[#d4af37] cursor-grab active:cursor-grabbing"
-            title="Drag to move"
-          >
-            <GripVertical className="w-3 h-3" />
-          </button>
-          <button
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             className="text-red-400 hover:text-red-300"
             title="Remove ad"
           >
-            <X className="w-3 h-3" />
+            <X className="w-3 h-3 md:w-4 md:h-4" />
           </button>
         </div>
       )}
@@ -559,6 +597,9 @@ function RowArticle({
   onVariantChange,
   dragId,
   size = "medium",
+  isMobile,
+  onReplace,
+  zoneId,
 }: {
   article: Article;
   variant: VariantType;
@@ -568,6 +609,9 @@ function RowArticle({
   onVariantChange: (variant: VariantType) => void;
   dragId: string;
   size?: "large" | "medium" | "small";
+  isMobile?: boolean;
+  onReplace?: (zoneId: string) => void;
+  zoneId?: string;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: dragId,
@@ -606,15 +650,18 @@ function RowArticle({
       ref={setNodeRef}
       style={style}
       className="relative border-b-2 border-[#1a1a1a] pb-4 mb-4 group"
-      onMouseEnter={() => setShowControls(true)}
+      onMouseEnter={() => !isMobile && setShowControls(true)}
       onMouseLeave={() => {
-        setShowControls(false);
-        setShowVariantMenu(false);
+        if (!isMobile) {
+          setShowControls(false);
+          setShowVariantMenu(false);
+        }
       }}
+      onTouchStart={() => isMobile && setShowControls(true)}
     >
       {/* Control Bar */}
-      {showControls && (
-        <div className="absolute -top-6 right-0 flex items-center gap-2 bg-[#1a0f08] border border-[#8b6f47] rounded px-2 py-1 z-10">
+      {(showControls || isMobile) && (
+        <div className="absolute -top-6 right-0 flex items-center gap-1 md:gap-2 bg-[#1a0f08] border border-[#8b6f47] rounded px-1 md:px-2 py-1 z-10">
           <button
             {...attributes}
             {...listeners}
@@ -625,6 +672,7 @@ function RowArticle({
           </button>
           <div className="relative">
             <button
+              data-tutorial="variant-selector"
               onClick={() => setShowVariantMenu(!showVariantMenu)}
               className="text-[#e8dcc6] hover:text-[#d4af37] text-xs px-2 py-1 border border-[#8b6f47] rounded flex items-center gap-1"
             >
@@ -688,7 +736,11 @@ function InteractiveNewspaper({
   ads,
   onDeleteArticle,
   onVariantChange,
+  username,
   onArticleMove,
+  onZoneTap,
+  isMobile,
+  onReplace,
 }: {
   zoneState: ZoneState;
   articles: Article[];
@@ -696,21 +748,19 @@ function InteractiveNewspaper({
   onDeleteArticle: (zoneId: string) => void;
   onVariantChange: (zoneId: string, variant: VariantType) => void;
   onArticleMove: (fromZoneId: string, toZoneId: string) => void;
+  username: string | null;
+  onZoneTap?: (zoneId: string) => void;
+  isMobile?: boolean;
+  onReplace?: (zoneId: string) => void;
 }) {
   const { newspaperName } = useGame();
   const articleMap = new Map(articles.map((a) => [a.id, a]));
   const adMap = new Map(ads.map((a) => [a.id, a]));
   
-  // Debug logging for ads
-  console.log("[EditorPage] adMap created:", {
-    adsCount: ads.length,
-    adMapSize: adMap.size,
-    adIds: ads.map(a => ({id: a.id, type: typeof a.id})),
-  });
 
   return (
-    <div className="min-h-screen bg-transparent py-8 px-4 md:px-8">
-      <div className="max-w-7xl mx-auto vintage-newspaper-paper p-8 md:p-12">
+    <div className="min-h-screen bg-transparent py-2 md:py-8 px-0 md:px-8 w-full">
+      <div className="w-full md:max-w-7xl md:mx-auto vintage-newspaper-paper p-2 md:p-12">
         {/* Masthead */}
         <header className="text-center mb-8 border-b-4 border-[#1a1a1a] pb-6">
           <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold mb-4 tracking-tight">
@@ -733,7 +783,14 @@ function InteractiveNewspaper({
         <div className="space-y-6">
           {/* Row 1: 1 breed artikel */}
           <div className="grid grid-cols-1 gap-4">
-            <DroppableZone zoneId="row1" zoneType="row1" className="w-full" isEmpty={zoneState.row1.length === 0}>
+            <DroppableZone 
+              zoneId="row1" 
+              zoneType="row1" 
+              className="w-full" 
+              isEmpty={zoneState.row1.length === 0}
+              onTap={onZoneTap ? () => onZoneTap("row1") : undefined}
+              isMobile={isMobile}
+            >
               {zoneState.row1.map((placed, index) => {
                 if (placed.type === "article") {
                   const article = articleMap.get(placed.articleId);
@@ -749,16 +806,13 @@ function InteractiveNewspaper({
                       onVariantChange={(variant) => onVariantChange(`row1_${index}`, variant)}
                       dragId={`placed-row1_${index}`}
                       size="large"
+                      isMobile={isMobile}
+                      onReplace={onReplace}
+                      zoneId={`row1_${index}`}
                     />
                   );
                 } else {
                   const ad = adMap.get(placed.adId);
-                  console.log("[Row1 RowAd] Looking up ad:", {
-                    placedAdId: placed.adId,
-                    foundAd: !!ad,
-                    adMapSize: adMap.size,
-                    allAdIds: Array.from(adMap.keys()),
-                  });
                   if (!ad) return null;
                   return (
                     <RowAd
@@ -769,6 +823,9 @@ function InteractiveNewspaper({
                       onDelete={() => onDeleteArticle(`row1_${index}`)}
                       dragId={`placed-row1_${index}`}
                       size="large"
+                      isMobile={isMobile}
+                      onReplace={onReplace}
+                      zoneId={`row1_${index}`}
                     />
                   );
                 }
@@ -777,7 +834,7 @@ function InteractiveNewspaper({
           </div>
 
           {/* Row 2: 2 artikelen naast elkaar */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+          <div className="grid grid-cols-2 gap-2 md:gap-6">
             {[0, 1].map((slotIndex) => (
               <DroppableZone
                 key={`row2-slot-${slotIndex}`}
@@ -785,6 +842,8 @@ function InteractiveNewspaper({
                 zoneType="row2"
                 className="w-full"
                 isEmpty={!zoneState.row2[slotIndex]}
+                onTap={onZoneTap ? () => onZoneTap(`row2_${slotIndex}`) : undefined}
+                isMobile={isMobile}
               >
                 {zoneState.row2[slotIndex] && (() => {
                   const placed = zoneState.row2[slotIndex];
@@ -801,6 +860,9 @@ function InteractiveNewspaper({
                         onVariantChange={(variant) => onVariantChange(`row2_${slotIndex}`, variant)}
                         dragId={`placed-row2_${slotIndex}`}
                         size="medium"
+                        isMobile={isMobile}
+                        onReplace={onReplace}
+                        zoneId={`row2_${slotIndex}`}
                       />
                     );
                   } else {
@@ -814,6 +876,9 @@ function InteractiveNewspaper({
                         onDelete={() => onDeleteArticle(`row2_${slotIndex}`)}
                         dragId={`placed-row2_${slotIndex}`}
                         size="medium"
+                        isMobile={isMobile}
+                        onReplace={onReplace}
+                        zoneId={`row2_${slotIndex}`}
                       />
                     );
                   }
@@ -823,7 +888,7 @@ function InteractiveNewspaper({
           </div>
 
           {/* Row 3: 3 artikelen naast elkaar */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+          <div className="grid grid-cols-3 gap-2 md:gap-6">
             {[0, 1, 2].map((slotIndex) => (
               <DroppableZone
                 key={`row3-slot-${slotIndex}`}
@@ -831,6 +896,8 @@ function InteractiveNewspaper({
                 zoneType="row3"
                 className="w-full"
                 isEmpty={!zoneState.row3[slotIndex]}
+                onTap={onZoneTap ? () => onZoneTap(`row3_${slotIndex}`) : undefined}
+                isMobile={isMobile}
               >
                 {zoneState.row3[slotIndex] && (() => {
                   const placed = zoneState.row3[slotIndex];
@@ -847,6 +914,9 @@ function InteractiveNewspaper({
                         onVariantChange={(variant) => onVariantChange(`row3_${slotIndex}`, variant)}
                         dragId={`placed-row3_${slotIndex}`}
                         size="small"
+                        isMobile={isMobile}
+                        onReplace={onReplace}
+                        zoneId={`row3_${slotIndex}`}
                       />
                     );
                   } else {
@@ -860,6 +930,9 @@ function InteractiveNewspaper({
                         onDelete={() => onDeleteArticle(`row3_${slotIndex}`)}
                         dragId={`placed-row3_${slotIndex}`}
                         size="small"
+                        isMobile={isMobile}
+                        onReplace={onReplace}
+                        zoneId={`row3_${slotIndex}`}
                       />
                     );
                   }
@@ -873,7 +946,7 @@ function InteractiveNewspaper({
         <footer className="mt-8 pt-4 border-t-2 border-[#1a1a1a] text-center">
           <p className="text-xs text-[#666]">
             © {new Date().getFullYear()} {newspaperName}. All rights reserved. | 
-            Printed in Dystopia | 
+            Printed in Dystopia{username ? ` | Editor: ${username}` : ""} | 
             "The Truth, Sometimes"
           </p>
         </footer>
@@ -907,6 +980,21 @@ export default function EditorPage() {
   const [refreshProgress, setRefreshProgress] = useState<string>("");
   const [isShopOpen, setIsShopOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [paperSentToday, setPaperSentToday] = useState(false);
+  const [isTestMode, setIsTestMode] = useState(false); // Flag to prevent auto-disable after test simulation
+  const [showPaperSentPopup, setShowPaperSentPopup] = useState(false);
+  const [lastPublishedEdition, setLastPublishedEdition] = useState<PublishedEditionResponse | null>(null);
+  const [yesterdayEdition, setYesterdayEdition] = useState<PublishedEditionResponse | null>(null);
+  const [showYesterdayPaper, setShowYesterdayPaper] = useState(false);
+  const [pendingReportData, setPendingReportData] = useState<{
+    totalCash: number;
+    cashBreakdown: { ads: number; bonuses: number; penalties: number };
+    totalReaders: number;
+    readerChange: number;
+    credibilityScore: number;
+    credibilityEvents: string[];
+    editionId: number | null;
+  } | null>(null);
   const [reportData, setReportData] = useState<{
     totalCash: number;
     cashBreakdown: { ads: number; bonuses: number; penalties: number };
@@ -920,17 +1008,101 @@ export default function EditorPage() {
   const hasPlacedItems =
     zoneState.row1.length > 0 || zoneState.row2.length > 0 || zoneState.row3.length > 0;
 
+  // Draft auto-save functionality
+  const DRAFT_STORAGE_KEY = "newspaper_draft";
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Save draft to localStorage
+  const saveDraft = useCallback((state: ZoneState) => {
+    if (isGuest) return; // Don't save drafts for guests
+    
+    try {
+      const draft = {
+        zoneState: state,
+        timestamp: new Date().toISOString(),
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    } catch (error) {
+      console.error("Failed to save draft:", error);
+    }
+  }, [isGuest]);
+
+  // Load draft from localStorage
+  const loadDraft = useCallback((): ZoneState | null => {
+    if (isGuest) return null;
+    
+    try {
+      const draftJson = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!draftJson) return null;
+      
+      const draft = JSON.parse(draftJson);
+      
+      // Check if draft is not too old (e.g., older than 7 days)
+      const draftDate = new Date(draft.timestamp);
+      const daysSinceDraft = (Date.now() - draftDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceDraft > 7) {
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        return null;
+      }
+      
+      return draft.zoneState as ZoneState;
+    } catch (error) {
+      console.error("Failed to load draft:", error);
+      return null;
+    }
+  }, [isGuest]);
+
+  // Clear draft from localStorage
+  const clearDraft = useCallback(() => {
+    try {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } catch (error) {
+      console.error("Failed to clear draft:", error);
+    }
+  }, []);
+
   const { user } = useAuth();
-  const { newspaperName } = useGame();  // Add this line to get newspaperName
+  const { newspaperName, refreshGameState } = useGame();  // Add refreshGameState
+  const isMobile = useMobile();
+  const [username, setUsername] = useState<string | null>(user?.username || null);
+  
+  // Mobile editor state
+  const [selectedZone, setSelectedZone] = useState<string | null>(null);
+  const [isContentModalOpen, setIsContentModalOpen] = useState(false);
+  const [contentModalType, setContentModalType] = useState<"article" | "ad" | "both">("both");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  
+  // Fetch username if not available in user object
+  useEffect(() => {
+    if (user?.id && !user?.username) {
+      // Username not in user object, fetch it directly
+      const { getPocketBase } = require("@/lib/pocketbase");
+      const pb = getPocketBase();
+      pb.collection("users").getOne(user.id)
+        .then((userData) => {
+          if (userData?.username) {
+            setUsername(userData.username);
+          }
+        })
+        .catch((error) => {
+          console.error("[EditorPage] Failed to fetch username:", error);
+        });
+    } else if (user?.username) {
+      setUsername(user.username);
+    }
+  }, [user?.id, user?.username]);
+  
   
   // Check if current user is admin
   const isAdmin = user?.email === ADMIN_EMAIL;
 
+  // Disable sensors when paper has been sent today
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 10,
       },
+      disabled: paperSentToday, // Disable drag when paper sent today
     })
   );
 
@@ -945,7 +1117,6 @@ export default function EditorPage() {
         ]);
         setDailyEdition(edition);
         setAds(adsList || []);
-        console.log(`[EditorPage] Loaded ${adsList?.length || 0} ads`);
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "Failed to load data";
         setError(errorMessage);
@@ -959,6 +1130,251 @@ export default function EditorPage() {
 
     loadData();
   }, []);
+
+  // Auto-save draft when zoneState changes (with debounce)
+  useEffect(() => {
+    if (isGuest || paperSentToday) return; // Don't save if guest or paper already sent
+    
+    // Clear existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    // Set new timeout to save after 1 second of no changes
+    saveTimeoutRef.current = setTimeout(() => {
+      saveDraft(zoneState);
+    }, 1000);
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [zoneState, isGuest, paperSentToday, saveDraft]);
+
+  // Load draft on mount (only if no paper sent today)
+  useEffect(() => {
+    if (isGuest || paperSentToday) return;
+    
+    const draft = loadDraft();
+    if (draft) {
+      // Check if draft has any items
+      const hasItems = draft.row1.length > 0 || draft.row2.length > 0 || draft.row3.length > 0;
+      if (hasItems) {
+        setZoneState(draft);
+        toast.success("Draft restored", {
+          duration: 2000,
+          icon: "💾",
+        });
+      }
+    }
+  }, [isGuest, paperSentToday, loadDraft]);
+
+  // Check if paper has been sent today (disable grid if so)
+  // Skip this check if we're in test mode (after simulating next day)
+  useEffect(() => {
+    async function checkPaperSentToday() {
+      if (isGuest || isTestMode) return; // Skip check in test mode
+      
+      try {
+        const hasSent = await hasPublishedToday();
+        setPaperSentToday(hasSent);
+      } catch (error) {
+        console.error("Failed to check if paper sent today:", error);
+      }
+    }
+
+    checkPaperSentToday();
+  }, [isGuest, isTestMode]);
+
+  // Function to simulate next day (use the most recently published paper and show Morning Report)
+  const simulateNextDay = async () => {
+    if (isGuest) return;
+    
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    console.log("🌅 NEXT DAY FLOW: Starting");
+    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    try {
+      console.log("🌅 NEXT DAY FLOW: Step 1 - Clearing all previous state");
+      // Clear all related state FIRST to ensure clean slate
+      setReportData(null);
+      setPendingReportData(null);
+      setShowYesterdayPaper(false);
+      setYesterdayEdition(null);
+      
+      console.log("🌅 NEXT DAY FLOW: Step 2 - Enabling test mode");
+      // Enable test mode FIRST to prevent checkYesterdayPaper and checkPaperSentToday from running
+      setIsTestMode(true);
+      
+      console.log("🌅 NEXT DAY FLOW: Step 3 - Fetching published editions");
+      // Get all published editions and use the most recent one
+      const { getAllPublishedEditions } = await import("@/lib/api");
+      const allEditions = await getAllPublishedEditions();
+      
+      if (allEditions.length === 0) {
+        console.log("🌅 NEXT DAY FLOW: ❌ ERROR - No published papers found");
+        toast.error("No published papers found. Publish a paper first!", {
+          duration: 3000,
+        });
+        return;
+      }
+      
+      // Use the most recent edition (first in the sorted list)
+      const mostRecent = allEditions[0];
+      console.log("🌅 NEXT DAY FLOW: Step 4 - Using most recent paper (ID:", mostRecent.id + ")");
+      
+      console.log("🌅 NEXT DAY FLOW: Step 5 - Setting up newspaper animation");
+      // Set the edition and show animation after a brief delay to ensure state is cleared
+      setYesterdayEdition(mostRecent);
+      // Use setTimeout to ensure state updates are applied before showing animation
+      setTimeout(() => {
+        setShowYesterdayPaper(true);
+        console.log("🌅 NEXT DAY FLOW: Step 6 - Animation triggered");
+      }, 50);
+      
+      console.log("🌅 NEXT DAY FLOW: Step 7 - Calculating Morning Report statistics");
+      // Calculate stats for Morning Report (but don't set reportData yet - wait for animation)
+      // Use the second most recent edition for comparison (if it exists)
+      const previousEdition = allEditions.length > 1 ? allEditions[1] : null;
+      const previousReaders = previousEdition?.stats?.readers || 10000; // Default starting readers
+      const currentReaders = mostRecent.stats?.readers || 0;
+      const readerChange = currentReaders - previousReaders;
+      
+      // Get recent transactions to calculate cash breakdown
+      const transactions = await getRecentTransactions(10);
+      let ads = 0;
+      let bonuses = 0;
+      let penalties = 0;
+      
+      transactions.forEach(t => {
+        if (t.type === "income") {
+          if (t.description.toLowerCase().includes("ad")) {
+            ads += t.amount;
+          } else if (t.description.toLowerCase().includes("bonus")) {
+            bonuses += t.amount;
+          }
+        } else {
+          penalties += Math.abs(t.amount);
+        }
+      });
+      
+      // Store report data in a ref or state that will be set after animation
+      // We'll set it in onAnimationComplete
+      const reportDataToSet = {
+        totalCash: Math.round(mostRecent.stats?.cash || 0),
+        cashBreakdown: { ads, bonuses, penalties },
+        totalReaders: Math.round(currentReaders),
+        readerChange: Math.round(readerChange),
+        credibilityScore: Math.round(mostRecent.stats?.credibility || 0),
+        credibilityEvents: [],
+        editionId: mostRecent.id,
+      };
+      
+      console.log("🌅 NEXT DAY FLOW: Step 8 - Report data prepared:", {
+        totalCash: reportDataToSet.totalCash,
+        totalReaders: reportDataToSet.totalReaders,
+        readerChange: reportDataToSet.readerChange,
+        credibilityScore: reportDataToSet.credibilityScore
+      });
+      
+      // Store in a ref so we can access it in onAnimationComplete
+      // Actually, we can use a closure or set it in a state variable that's not reportData
+      // Let's use a separate state for pending report data
+      setPendingReportData(reportDataToSet);
+      
+      // Reset paperSentToday so grid is enabled after Morning Report
+      // Use setTimeout to ensure isTestMode is set first
+      setTimeout(() => {
+        setPaperSentToday(false);
+      }, 0);
+      
+      console.log("🌅 NEXT DAY FLOW: Step 9 - Waiting for animation to complete and user to click 'Proceed'");
+      toast.success("Next day simulated! Showing paper with animation.", {
+        duration: 3000,
+      });
+    } catch (error) {
+      console.log("🌅 NEXT DAY FLOW: ❌ ERROR -", error);
+      console.error("Failed to simulate next day:", error);
+      toast.error("Failed to simulate next day", {
+        duration: 3000,
+      });
+    }
+  };
+
+  // Check for yesterday's paper on FIRST page load only (not on every navigation)
+  // Use localStorage to track if we've already checked today for this user
+  useEffect(() => {
+    async function checkYesterdayPaper() {
+      if (isGuest || isTestMode) return;
+      
+      // Only check once per user per day (track by user ID and date)
+      const currentUserId = user?.id;
+      if (!currentUserId) return; // Wait for user to be loaded
+      
+      // Check if we've already checked today for this user
+      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      const storageKey = `yesterdayPaperChecked_${currentUserId}_${today}`;
+      const hasCheckedToday = localStorage.getItem(storageKey);
+      
+      if (hasCheckedToday) {
+        return; // Already checked today, skip
+      }
+      
+      // Mark that we've checked today
+      localStorage.setItem(storageKey, 'true');
+      
+      try {
+        const yesterday = await getYesterdayEdition();
+        if (yesterday) {
+          setYesterdayEdition(yesterday);
+          // Show the paper first, then Morning Report
+          setShowYesterdayPaper(true);
+          
+          // Calculate stats for Morning Report
+          const dayBefore = await getDayBeforeYesterdayEdition();
+          const previousReaders = dayBefore?.stats?.readers || 10000; // Default starting readers
+          const yesterdayReaders = yesterday.stats?.readers || 0;
+          const readerChange = yesterdayReaders - previousReaders;
+          
+          // Get recent transactions to calculate cash breakdown
+          const transactions = await getRecentTransactions(10);
+          let ads = 0;
+          let bonuses = 0;
+          let penalties = 0;
+          
+          transactions.forEach(t => {
+            if (t.type === "income") {
+              if (t.description.toLowerCase().includes("ad")) {
+                ads += t.amount;
+              } else if (t.description.toLowerCase().includes("bonus")) {
+                bonuses += t.amount;
+              }
+            } else {
+              penalties += Math.abs(t.amount);
+            }
+          });
+          
+          // Store in pendingReportData instead of reportData directly
+          // This ensures the animation shows first
+          setPendingReportData({
+            totalCash: Math.round(yesterday.stats?.cash || 0),
+            cashBreakdown: { ads, bonuses, penalties },
+            totalReaders: Math.round(yesterdayReaders),
+            readerChange: Math.round(readerChange),
+            credibilityScore: Math.round(yesterday.stats?.credibility || 0),
+            credibilityEvents: [],
+            editionId: yesterday.id,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to check for yesterday's paper:", error);
+      }
+    }
+
+    checkYesterdayPaper();
+  }, [isGuest, isTestMode, user?.id]);
 
   const reloadLatest = async () => {
     const [edition, adsList] = await Promise.all([
@@ -984,14 +1400,10 @@ export default function EditorPage() {
       // Small delay to show the first message
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      setRefreshProgress("Fetching new articles from RSS feed...");
-      const result = await resetAndIngest();
-      
-      setRefreshProgress("Processing articles with AI...");
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setRefreshProgress("Geocoding locations...");
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Use async job with polling for better progress tracking
+      await resetAndIngestWithPolling((progress, status) => {
+        setRefreshProgress(progress || "Processing...");
+      });
       
       setRefreshProgress("Loading new scoops...");
       await reloadLatest();
@@ -1053,9 +1465,13 @@ export default function EditorPage() {
     cashBreakdown: { ads: number; bonuses: number; penalties: number };
     readerChange: number;
   } => {
-    let cash = 0;
-    let credibility = 50; // Start at 50%
-    let readers = 10000; // Start at 10k
+    // Start from last published edition stats, or use defaults if no previous edition
+    const startingCredibility = lastPublishedEdition?.stats?.credibility ?? 50;
+    const startingReaders = lastPublishedEdition?.stats?.readers ?? 10000;
+    
+    let cash = 0; // Cash is always calculated fresh (will be added to treasury in backend)
+    let credibility = startingCredibility; // Start from last edition's credibility
+    let readers = startingReaders; // Start from last edition's readers
     let adsCash = 0;
     let bonusCash = 0;
     let penaltyCash = 0;
@@ -1247,6 +1663,9 @@ export default function EditorPage() {
     credibility = Math.max(0, Math.min(100, credibility));
     readers = Math.max(0, readers);
 
+    // Calculate reader change from starting readers (last edition or default)
+    const readerChange = readers - startingReaders;
+
     return {
       cash,
       credibility,
@@ -1256,7 +1675,7 @@ export default function EditorPage() {
         bonuses: Math.round(bonusCash),
         penalties: Math.round(penaltyCash),
       },
-      readerChange: Math.round(readers - 10000),
+      readerChange: Math.round(readerChange),
     };
   };
 
@@ -1396,24 +1815,41 @@ export default function EditorPage() {
         newspaperName // Include newspaper name
       );
       
-      // Show Morning Report instead of immediate redirect
-      setReportData({
-        totalCash: Math.round(publishStats.cash),
-        cashBreakdown: publishStats.cashBreakdown,
-        totalReaders: Math.round(publishStats.readers),
-        readerChange: Math.round(publishStats.readerChange),
-        credibilityScore: Math.round(publishStats.credibility),
-        credibilityEvents: [], // Placeholder for future event messages
-        editionId: response.id ?? null,
-      });
+      // Mark that paper has been sent today
+      setPaperSentToday(true);
       
-      toast.success("Newspaper published successfully!", {
+      // Disable test mode after publishing (new paper sent)
+      setIsTestMode(false);
+      
+      // Clear draft after successful publication
+      clearDraft();
+      
+      // Show popup instead of Morning Report
+      setShowPaperSentPopup(true);
+      
+      // Refresh game state to show updated treasury, readers, and credibility
+      await refreshGameState();
+      
+      // Reload last published edition for next time
+      const { getAllPublishedEditions } = await import("@/lib/api");
+      const allEditions = await getAllPublishedEditions();
+      if (allEditions.length > 0) {
+        setLastPublishedEdition(allEditions[0]);
+      }
+      
+      toast.success("Newspaper sent to press successfully!", {
         duration: 3000,
       });
+
+      // Advance tutorial if on step 8 (publish step)
+      // Dispatch custom event that tutorial can listen to
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('newspaper-published'));
+      }
     } catch (error) {
-      console.error("Failed to publish:", error);
+      console.error("Failed to send to press:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      toast.error(`Failed to publish: ${errorMessage}`, {
+      toast.error(`Failed to send to press: ${errorMessage}`, {
         duration: 5000,
       });
     } finally {
@@ -1457,6 +1893,11 @@ export default function EditorPage() {
   }, [isResizing]);
 
   const handleDragStart = (event: DragStartEvent) => {
+    // Block drag if paper has already been sent today
+    if (paperSentToday) {
+      return;
+    }
+    
     const { active } = event;
     const activeId = active.id as string;
 
@@ -1535,6 +1976,13 @@ export default function EditorPage() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
+    // Block drag if paper has already been sent today
+    if (paperSentToday) {
+      setActiveDragItem(null);
+      setActiveDragItemType(null);
+      return;
+    }
+    
     setActiveDragItem(null);
     setActiveDragItemType(null);
     const { active, over } = event;
@@ -1616,12 +2064,6 @@ export default function EditorPage() {
     // Wire to Zone - Ads
     if (activeId.startsWith("ad-")) {
       const adId = activeId.replace("ad-", "");  // Changed from parseInt to string
-      console.log("[handleDrop] Ad dropped:", {
-        activeId,
-        extractedAdId: adId,
-        extractedAdIdType: typeof adId,
-        overId,
-      });
       const target = parseZoneId(overId);
 
       setZoneState((prev) => {
@@ -1825,9 +2267,137 @@ export default function EditorPage() {
     });
   };
 
+  // Helper to parse zone info (reused from handleDragEnd)
+  const parseZoneId = (zoneId: string): { zone: "row1" | "row2" | "row3"; index: number | null } => {
+    if (zoneId === "row1") return { zone: "row1", index: null };
+    if (zoneId.startsWith("row1_")) {
+      const index = parseInt(zoneId.replace("row1_", ""), 10);
+      return { zone: "row1", index };
+    }
+    if (zoneId === "row2") return { zone: "row2", index: null };
+    if (zoneId.startsWith("row2_")) {
+      const index = parseInt(zoneId.replace("row2_", ""), 10);
+      return { zone: "row2", index };
+    }
+    if (zoneId === "row3") return { zone: "row3", index: null };
+    if (zoneId.startsWith("row3_")) {
+      const index = parseInt(zoneId.replace("row3_", ""), 10);
+      return { zone: "row3", index };
+    }
+    return { zone: "row1", index: null };
+  };
+
+  // Mobile: Handle zone tap to open content selection modal
+  const handleZoneTap = (zoneId: string) => {
+    if (!isMobile) return;
+    setSelectedZone(zoneId);
+    setContentModalType("both");
+    setIsContentModalOpen(true);
+  };
+
+  // Mobile: Handle content selection from modal
+  const handleContentSelect = (item: { type: "article"; article: Article; variant?: "factual" | "sensationalist" | "propaganda" } | { type: "ad"; ad: Ad }) => {
+    if (!selectedZone) return;
+
+    const target = parseZoneId(selectedZone);
+
+    if (item.type === "article") {
+      const articleId = item.article.id;
+      const variant = item.variant || "factual";
+
+      setZoneState((prev) => {
+        const newState = { ...prev };
+        const newItem: PlacedArticle = {
+          type: "article",
+          articleId,
+          variant,
+          zoneId: selectedZone,
+        };
+
+        if (target.zone === "row1") {
+          newState.row1 = [newItem];
+        } else if (target.zone === "row2") {
+          if (target.index !== null && target.index >= 0 && target.index < 2) {
+            newState.row2 = [...prev.row2];
+            newState.row2[target.index] = newItem;
+          } else {
+            const emptyIndex = prev.row2.findIndex((a) => !a);
+            if (emptyIndex !== -1) {
+              newState.row2 = [...prev.row2];
+              newState.row2[emptyIndex] = newItem;
+            } else {
+              newState.row2 = prev.row2.length < 2 ? [...prev.row2, newItem] : prev.row2;
+            }
+          }
+        } else if (target.zone === "row3") {
+          if (target.index !== null && target.index >= 0 && target.index < 3) {
+            newState.row3 = [...prev.row3];
+            newState.row3[target.index] = newItem;
+          } else {
+            const emptyIndex = prev.row3.findIndex((a) => !a);
+            if (emptyIndex !== -1) {
+              newState.row3 = [...prev.row3];
+              newState.row3[emptyIndex] = newItem;
+            } else {
+              newState.row3 = prev.row3.length < 3 ? [...prev.row3, newItem] : prev.row3;
+            }
+          }
+        }
+
+        return newState;
+      });
+    } else if (item.type === "ad") {
+      const adId = item.ad.id;
+
+      setZoneState((prev) => {
+        const newState = { ...prev };
+        const newItem: PlacedAd = {
+          type: "ad",
+          adId,
+          zoneId: selectedZone,
+        };
+
+        if (target.zone === "row1") {
+          newState.row1 = [newItem];
+        } else if (target.zone === "row2") {
+          if (target.index !== null && target.index >= 0 && target.index < 2) {
+            newState.row2 = [...prev.row2];
+            newState.row2[target.index] = newItem;
+          } else {
+            const emptyIndex = prev.row2.findIndex((a) => !a);
+            if (emptyIndex !== -1) {
+              newState.row2 = [...prev.row2];
+              newState.row2[emptyIndex] = newItem;
+            } else {
+              newState.row2 = prev.row2.length < 2 ? [...prev.row2, newItem] : prev.row2;
+            }
+          }
+        } else if (target.zone === "row3") {
+          if (target.index !== null && target.index >= 0 && target.index < 3) {
+            newState.row3 = [...prev.row3];
+            newState.row3[target.index] = newItem;
+          } else {
+            const emptyIndex = prev.row3.findIndex((a) => !a);
+            if (emptyIndex !== -1) {
+              newState.row3 = [...prev.row3];
+              newState.row3[emptyIndex] = newItem;
+            } else {
+              newState.row3 = prev.row3.length < 3 ? [...prev.row3, newItem] : prev.row3;
+            }
+          }
+        }
+
+        return newState;
+      });
+    }
+
+    setSelectedZone(null);
+    setIsContentModalOpen(false);
+  };
+
   // Filter items to only show those NOT currently placed
-  const placedArticleIds = new Set<number>();
-  const placedAdIds = new Set<number>();
+  const placedArticleIds = new Set<string>();
+  const placedAdIds = new Set<string>();
   
   zoneState.row1.forEach((item) => {
     if (item && item.type === "article") placedArticleIds.add(item.articleId);
@@ -1846,15 +2416,6 @@ export default function EditorPage() {
     dailyEdition?.articles.filter((article) => !placedArticleIds.has(article.id)) || [];
   const availableAds = ads.filter((ad) => !placedAdIds.has(ad.id));
   
-  // Debug logging
-  useEffect(() => {
-    console.log(`[EditorPage] Ads state:`, {
-      totalAds: ads.length,
-      availableAds: availableAds.length,
-      placedAdIds: Array.from(placedAdIds),
-      showAds: showAds,
-    });
-  }, [ads, availableAds, placedAdIds, showAds]);
 
   if (loading) {
     return (
@@ -1893,12 +2454,43 @@ export default function EditorPage() {
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className="h-screen flex overflow-hidden bg-[#2a1810]" data-editor-container>
-        {/* Left Panel - The Wire */}
-        <div
-          className="h-full flex flex-col bg-[#1a0f08] border-r-2 border-[#8b6f47] paper-texture overflow-hidden flex-shrink-0"
-          style={{ width: `${splitterPosition}%` }}
-        >
+      <div className="h-screen flex flex-col overflow-hidden bg-[#2a1810]" data-editor-container>
+        {/* Mobile Header - Always visible on mobile */}
+        {isMobile && (
+          <div className="bg-[#1a0f08] bg-opacity-90 border-b border-[#8b6f47] p-3 paper-texture z-[1000] flex items-center justify-between flex-shrink-0">
+            <button
+              onClick={() => setIsDrawerOpen(true)}
+              className="p-2 rounded hover:bg-[#3a2418] text-[#8b6f47] transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <div className="flex-1 text-center">
+              <p className="text-lg font-bold text-[#e8dcc6] font-serif">{newspaperName}</p>
+              <p className="text-xs text-[#8b6f47] mt-0.5">Front Page Editor</p>
+            </div>
+            <div className="w-10" /> {/* Spacer for centering */}
+          </div>
+        )}
+
+        {/* Mobile Drawer */}
+        {isMobile && (
+          <MobileDrawer
+            isOpen={isDrawerOpen}
+            onClose={() => setIsDrawerOpen(false)}
+            onRefreshScoops={handleRefreshScoops}
+            onOpenShop={() => setIsShopOpen(true)}
+            isRefreshing={isRefreshing}
+          />
+        )}
+
+        <div className="flex-1 flex overflow-hidden">
+        {/* Left Panel - The Wire (Desktop Only) */}
+        {!isMobile && (
+          <div
+            className="h-full flex flex-col bg-[#1a0f08] border-r-2 border-[#8b6f47] paper-texture overflow-hidden flex-shrink-0"
+            style={{ width: `${splitterPosition}%` }}
+          >
           {/* Header with Assistant */}
           <div className="bg-[#2a1810] border-b border-[#8b6f47] p-4 flex-shrink-0">
             <div className="mb-3">
@@ -1931,6 +2523,7 @@ export default function EditorPage() {
                 <span>Scoops ({availableArticles.length})</span>
               </button>
               <button
+                data-tutorial="ad-button"
                 onClick={() => setShowAds(true)}
                 className={`flex-1 px-3 py-2 rounded transition-colors flex items-center justify-center gap-2 text-sm ${
                   showAds
@@ -1945,11 +2538,11 @@ export default function EditorPage() {
           </div>
 
           {/* Wire Content - Full Width */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div data-tutorial="editor-wire" className="flex-1 overflow-y-auto p-4">
             {showAds ? (
               <div>
                 {availableAds.length > 0 ? (
-                  availableAds.map((ad) => <DraggableAdCard key={ad.id} ad={ad} />)
+                  availableAds.map((ad) => <DraggableAdCard key={ad.id} ad={ad} paperSentToday={paperSentToday} />)
                 ) : (
                   <p className="text-sm text-[#8b6f47] italic text-center py-8">
                     No available ads
@@ -1976,60 +2569,81 @@ export default function EditorPage() {
                 }}
                 viewMode="grid"
                 showHeader={false}
+                paperSentToday={paperSentToday}
               />
             )}
           </div>
         </div>
+        )}
 
-        {/* Resize Handle */}
-        <div
-          className="w-1 bg-[#8b6f47] hover:bg-[#d4af37] cursor-col-resize flex-shrink-0 transition-colors relative group"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            setIsResizing(true);
-          }}
-        >
-          {/* Visual indicator */}
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1 bg-transparent group-hover:bg-[#d4af37] transition-colors" />
-        </div>
+        {/* Resize Handle (Desktop Only) */}
+        {!isMobile && (
+          <div
+            className="w-1 bg-[#8b6f47] hover:bg-[#d4af37] cursor-col-resize flex-shrink-0 transition-colors relative group"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setIsResizing(true);
+            }}
+          >
+            {/* Visual indicator */}
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-1 bg-transparent group-hover:bg-[#d4af37] transition-colors" />
+          </div>
+        )}
 
         {/* Right Panel - Newspaper Preview + Toolbar */}
         <div
-          className="h-full flex overflow-hidden flex-shrink-0"
-          style={{ width: `${100 - splitterPosition}%` }}
+          className={`h-full flex overflow-hidden flex-shrink-0 ${isMobile ? "w-full" : ""}`}
+          style={!isMobile ? { width: `${100 - splitterPosition}%` } : {}}
         >
           <div className="h-full overflow-y-auto bg-[#2a1810] flex-1 relative">
-            {/* Floating Publish Button - Top Right */}
-            {hasPlacedItems && (
+            {/* Floating Send to Press Button - Top Right (Desktop) / Bottom (Mobile) */}
+            {hasPlacedItems && !paperSentToday && (
               <button
+                data-tutorial="publish-button"
                 onClick={handlePublish}
-                disabled={isPublishing || isGuest}
-                className={`fixed top-4 right-20 z-50 px-6 py-3 rounded-lg transition-all flex items-center gap-2 shadow-lg ${
-                  isPublishing || isGuest
+                disabled={isPublishing || isGuest || paperSentToday}
+                className={`${isMobile ? "fixed bottom-4 left-4 right-4 z-50" : "fixed top-4 right-20 z-50"} px-6 py-3 rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg ${
+                  isPublishing || isGuest || paperSentToday
                     ? "bg-[#3a2418] text-[#8b6f47] opacity-60 cursor-not-allowed"
                     : "bg-[#d4af37] text-[#1a0f08] hover:bg-[#e5c04a] hover:shadow-xl"
                 }`}
-                title={isGuest ? "Login required to publish" : "Publish Edition"}
+                title={paperSentToday ? "Paper already sent to press today" : isGuest ? "Login required to send to press" : "Send to Press"}
               >
                 {isPublishing ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
-                    <span className="font-serif font-bold">Publishing...</span>
+                    <span className="font-serif font-bold">Sending to press...</span>
                   </>
                 ) : isGuest ? (
                   <>
                     <span className="text-xl">🔒</span>
-                    <span className="font-serif font-bold">Login to Publish</span>
+                    <span className="font-serif font-bold">Login to Send</span>
                   </>
                 ) : (
                   <>
-                    <span className="text-xl">📰</span>
-                    <span className="font-serif font-bold">Publish</span>
+                    <Printer className="w-5 h-5" />
+                    <span className="font-serif font-bold">Send to Press</span>
                   </>
                 )}
               </button>
             )}
-            <div className="transform scale-[0.95] origin-top">
+            <div 
+              data-tutorial="grid-layout" 
+              className={`transform origin-top w-full ${isMobile ? "scale-[1]" : "scale-[0.95]"} relative ${paperSentToday ? "opacity-50 pointer-events-none" : ""}`}
+            >
+              {paperSentToday && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 backdrop-blur-sm rounded-lg">
+                  <div className="bg-[#1a0f08] border-2 border-[#d4af37] rounded-lg p-6 max-w-md mx-4 text-center">
+                    <Printer className="w-12 h-12 text-[#d4af37] mx-auto mb-4" />
+                    <h3 className="text-xl font-serif font-bold text-[#e8dcc6] mb-2">
+                      Paper Already Sent
+                    </h3>
+                    <p className="text-[#e8dcc6] text-sm">
+                      Your newspaper has been sent to press today. Check back tomorrow morning for your published paper and scores.
+                    </p>
+                  </div>
+                </div>
+              )}
               <InteractiveNewspaper
                 zoneState={zoneState}
                 articles={dailyEdition.articles}
@@ -2037,14 +2651,20 @@ export default function EditorPage() {
                 onDeleteArticle={handleDeleteArticle}
                 onVariantChange={handleVariantChange}
                 onArticleMove={() => {}} // Handled by drag & drop
+                username={username}
+                onZoneTap={handleZoneTap}
+                isMobile={isMobile}
+                onReplace={handleZoneTap}
               />
             </div>
           </div>
 
-          {/* Vertical Toolbar - Right Side */}
-          <div className="w-16 bg-[#1a0f08] border-l border-[#8b6f47] flex flex-col items-center gap-4 py-4 paper-texture flex-shrink-0">
+          {/* Vertical Toolbar - Right Side (Desktop Only) */}
+          {!isMobile && (
+            <div className="w-16 bg-[#1a0f08] border-l border-[#8b6f47] flex flex-col items-center gap-4 py-4 paper-texture flex-shrink-0">
           {/* Only show refresh button for admin */}
           {isAdmin && (
+            <>
             <button
               onClick={handleRefreshScoops}
               disabled={isRefreshing || isGuest}
@@ -2062,6 +2682,16 @@ export default function EditorPage() {
               )}
               <span className="text-[10px]">{isRefreshing ? "..." : "Fetch"}</span>
             </button>
+            <button
+              onClick={simulateNextDay}
+              disabled={isGuest}
+              className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+              title="Simulate Next Day (Test Only)"
+            >
+              <Calendar className="w-5 h-5" />
+              <span className="text-[10px]">Next Day</span>
+            </button>
+            </>
           )}
           <button
             onClick={() => router.push('/hub')}
@@ -2124,11 +2754,27 @@ export default function EditorPage() {
             <span className="text-[10px]">Shop</span>
           </button>
         </div>
+        )}
+        </div>
         </div>
       </div>
       
       {/* Shop Modal */}
       <ShopModal isOpen={isShopOpen} onClose={() => setIsShopOpen(false)} />
+
+      {/* Content Selection Modal (Mobile) */}
+      <ContentSelectionModal
+        isOpen={isContentModalOpen}
+        onClose={() => {
+          setIsContentModalOpen(false);
+          setSelectedZone(null);
+        }}
+        onSelect={handleContentSelect}
+        articles={availableArticles}
+        ads={availableAds}
+        contentType={contentModalType}
+        targetZone={selectedZone || undefined}
+      />
 
       {/* Drag Overlay */}
       <DragOverlay
@@ -2161,6 +2807,44 @@ export default function EditorPage() {
         ) : null}
       </DragOverlay>
 
+      {/* Paper Sent Popup */}
+      <PaperSentPopup
+        isOpen={showPaperSentPopup}
+        onClose={() => setShowPaperSentPopup(false)}
+      />
+
+      {/* Yesterday's Paper View with Rotating Animation */}
+      <NewspaperAnimation
+        editionId={yesterdayEdition?.id || null}
+        isOpen={showYesterdayPaper && !!yesterdayEdition && !reportData}
+        onClose={() => {
+          console.log("🌅 NEXT DAY FLOW: Step 10 - Animation closed, preparing Morning Report");
+          setShowYesterdayPaper(false);
+          // Show Morning Report if we have pending report data
+          if (pendingReportData) {
+            console.log("🌅 NEXT DAY FLOW: Step 11 - Displaying Morning Report");
+            setReportData(pendingReportData);
+            setPendingReportData(null);
+            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            console.log("🌅 NEXT DAY FLOW: Complete - Morning Report is now visible");
+            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+          }
+        }}
+        onAnimationComplete={() => {
+          console.log("🌅 NEXT DAY FLOW: Step 10 - Animation closed, preparing Morning Report");
+          // After animation completes, show Morning Report
+          setShowYesterdayPaper(false);
+          if (pendingReportData) {
+            console.log("🌅 NEXT DAY FLOW: Step 11 - Displaying Morning Report");
+            setReportData(pendingReportData);
+            setPendingReportData(null);
+            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            console.log("🌅 NEXT DAY FLOW: Complete - Morning Report is now visible");
+            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+          }
+        }}
+      />
+
       {/* Morning Report overlay */}
       {reportData && (
         <div className="fixed inset-0 z-[5000] bg-black/80 backdrop-blur-sm">
@@ -2171,10 +2855,36 @@ export default function EditorPage() {
             readerChange={reportData.readerChange}
             credibilityScore={reportData.credibilityScore}
             credibilityEvents={reportData.credibilityEvents}
-            onContinue={() => {
-              if (reportData.editionId !== null) {
+              onContinue={async () => {
+              // Refresh game state after viewing Morning Report
+              await refreshGameState();
+              
+              // If in test mode (simulated next day), enable grid for new edition
+              if (isTestMode) {
+                // Reset zoneState to start fresh for the new day
+                setZoneState({
+                  row1: [],
+                  row2: [],
+                  row3: [],
+                });
+                
+                // Clear any draft since we're starting a new day
+                clearDraft();
+                
+                // Grid is already enabled (paperSentToday is false in test mode)
+                toast.success("Grid enabled - create your new edition!", {
+                  duration: 2000,
+                });
+              }
+              
+              setReportData(null);
+              setShowYesterdayPaper(false);
+              setYesterdayEdition(null);
+              
+              // Only navigate to newspaper if not in test mode
+              if (!isTestMode && reportData.editionId !== null) {
                 router.push(`/newspaper?id=${reportData.editionId}`);
-              } else {
+              } else if (!isTestMode) {
                 router.push("/newspaper");
               }
             }}
