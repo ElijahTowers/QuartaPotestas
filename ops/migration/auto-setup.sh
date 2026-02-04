@@ -16,8 +16,20 @@ echo ""
 echo "🐍 Setting up Python environment..."
 cd backend
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
-    echo "✅ Virtual environment created"
+    # Try Python 3.12 first (most compatible), then 3.11, then 3.13, then default
+    if command -v python3.12 &> /dev/null; then
+        python3.12 -m venv venv
+        echo "✅ Virtual environment created with Python 3.12"
+    elif command -v python3.11 &> /dev/null; then
+        python3.11 -m venv venv
+        echo "✅ Virtual environment created with Python 3.11"
+    elif command -v python3.13 &> /dev/null; then
+        python3.13 -m venv venv
+        echo "✅ Virtual environment created with Python 3.13"
+    else
+        python3 -m venv venv
+        echo "✅ Virtual environment created with default Python"
+    fi
 fi
 source venv/bin/activate
 pip install --upgrade pip -q
