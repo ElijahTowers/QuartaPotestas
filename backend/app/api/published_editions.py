@@ -74,6 +74,8 @@ class GridPlacement(BaseModel):
     adId: str | None  # Changed from int to str
     headline: str | None = None  # NEW: Store displayed headline
     body: str | None = None  # NEW: Store displayed body text
+    row: int | None = None  # Row number: 1, 2, or 3
+    position: int | None = None  # Position within row: 0, 1, or 2
 
 
 class PublishRequest(BaseModel):
@@ -119,6 +121,8 @@ class PublicPublishedItem(BaseModel):
     variant: Optional[str] = None
     source: Optional[str] = None
     location: Optional[str] = None
+    row: Optional[int] = None  # Row number: 1, 2, or 3
+    position: Optional[int] = None  # Position within row: 0, 1, or 2
 
 
 class PublicEditionResponse(BaseModel):
@@ -485,6 +489,10 @@ async def get_public_edition(edition_id: str):
             if not body:
                 body = ""
 
+            # Extract row and position from grid_layout item
+            row = item.get("row")
+            position = item.get("position")
+            
             if is_ad:
                 published_items.append(PublicPublishedItem(
                     type="ad",
@@ -493,6 +501,8 @@ async def get_public_edition(edition_id: str):
                     variant=None,
                     source=None,
                     location=None,
+                    row=row,
+                    position=position,
                 ))
             else:
                 published_items.append(PublicPublishedItem(
@@ -502,6 +512,8 @@ async def get_public_edition(edition_id: str):
                     variant=variant,
                     source=None,
                     location=None,
+                    row=row,
+                    position=position,
                 ))
 
         # Get username from user record

@@ -34,27 +34,53 @@ class IngestionServicePB:
     
     async def _get_or_create_system_user(self) -> str:
         """Get or create a system user for ingestion."""
-        # Try to find existing system user
-        users = await self.pb.get_list(
-            "users",
-            filter='email = "system@ingestion.local"',
-        )
-        
-        if users:
-            return users[0]["id"]
-        
-        # Create system user if it doesn't exist
-        system_user_data = {
-            "email": "system@ingestion.local",
-            "password": "system_password_change_me",
-            "passwordConfirm": "system_password_change_me",
-        }
-        
-        system_user = await self.pb.create_record("users", system_user_data)
-        if not system_user:
-            raise Exception("Failed to create system user for ingestion")
-        
-        return system_user["id"]
+        try:
+            # Try to find existing system user
+            print(f"[IngestionServicePB] Checking for existing system user...")
+            users = await self.pb.get_list(
+                "users",
+                filter='email = "system@ingestion.local"',
+            )
+            
+            if users and len(users) > 0:
+                user_id = users[0]["id"]
+                print(f"[IngestionServicePB] Found existing system user: {user_id}")
+                return user_id
+            
+            # Check if admin token is available
+            if not hasattr(self.pb, 'admin_token') or not self.pb.admin_token:
+                raise Exception("Admin token not available. Cannot create system user without admin authentication.")
+            
+            # Create system user if it doesn't exist
+            system_user_data = {
+                "email": "system@ingestion.local",
+                "password": "system_password_change_me",
+                "passwordConfirm": "system_password_change_me",
+            }
+            
+            print(f"[IngestionServicePB] Creating system user: {system_user_data['email']}")
+            print(f"[IngestionServicePB] Admin token available: {bool(self.pb.admin_token)}")
+            
+            try:
+                system_user = await self.pb.create_record("users", system_user_data)
+            except Exception as create_error:
+                error_details = str(create_error)
+                print(f"[IngestionServicePB] create_record raised exception: {error_details}")
+                raise Exception(f"Failed to create system user: {error_details}")
+            
+            if not system_user:
+                raise Exception("Failed to create system user for ingestion: create_record returned None")
+            
+            user_id = system_user.get("id")
+            if not user_id:
+                raise Exception(f"System user created but no ID returned. Response: {system_user}")
+            
+            print(f"[IngestionServicePB] System user created successfully: {user_id}")
+            return user_id
+        except Exception as e:
+            error_msg = f"Failed to get or create system user for ingestion: {str(e)}"
+            print(f"[IngestionServicePB] ERROR: {error_msg}")
+            raise Exception(error_msg)
     
     def load_ads(self) -> List[dict]:
         """Load predefined ads from JSON file."""
@@ -233,6 +259,32 @@ class IngestionServicePB:
                     "resistance": 0,
                     "doomers": 0,
                 })
+                
+                # Check if article with same original_title already exists
+                # Use the simplified title (which is stored as original_title) for duplicate checking
+                # Escape quotes in title for PocketBase filter
+                title_escaped = title.replace('"', '\\"').replace("'", "\\'")
+                step_start = time.time()
+                existing_articles = await self.pb.get_list(
+                    "articles",
+                    filter=f'original_title = "{title_escaped}"',
+                )
+                step_timings["check_duplicate"] = round(time.time() - step_start, 2)
+                
+                if existing_articles and len(existing_articles) > 0:
+                    existing_id = existing_articles[0]["id"]
+                    existing_date = existing_articles[0].get("date", "unknown")
+                    print(f"[IngestionServicePB] ⚠️  Skipping duplicate article: '{title[:50]}...' (already exists: {existing_id}, date: {existing_date})")
+                    scoop_timings.append({
+                        "scoop_index": idx,
+                        "title": scoop_title,
+                        "duration_seconds": round(time.time() - scoop_start_time, 2),
+                        "status": "skipped_duplicate",
+                        "existing_id": existing_id,
+                        "existing_date": existing_date,
+                        "step_timings": step_timings
+                    })
+                    continue  # Skip this article
                 
                 # Create article in PocketBase
                 article_data = serialize_for_pb({

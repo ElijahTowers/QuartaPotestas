@@ -81,6 +81,66 @@ def parse_json_field(value: str | dict) -> dict:
     return {}
 
 
+def filter_duplicate_articles(articles: List[dict]) -> List[dict]:
+    """
+    Filter duplicate articles by original_title, keeping only the latest version.
+    Uses published_at or created timestamp to determine which is latest.
+    """
+    if not articles or len(articles) == 0:
+        return articles
+    
+    # Group articles by original_title
+    articles_by_title = {}
+    for article in articles:
+        title = article.get("original_title", "").strip()
+        if not title:
+            continue  # Skip articles without title
+        
+        if title not in articles_by_title:
+            articles_by_title[title] = []
+        articles_by_title[title].append(article)
+    
+    # For each title, keep only the latest article
+    unique_articles = []
+    for title, title_articles in articles_by_title.items():
+        if len(title_articles) == 1:
+            # Only one article with this title, keep it
+            unique_articles.append(title_articles[0])
+        else:
+            # Multiple articles with same title, keep the latest one
+            # Sort by published_at (newest first), then by created, then by id
+            def sort_key(art):
+                # Try published_at first
+                pub_at = art.get("published_at")
+                if pub_at:
+                    try:
+                        if isinstance(pub_at, str):
+                            from dateutil import parser as date_parser
+                            return date_parser.parse(pub_at).timestamp()
+                        return pub_at.timestamp() if hasattr(pub_at, 'timestamp') else 0
+                    except:
+                        pass
+                
+                # Fallback to created timestamp
+                created = art.get("created")
+                if created:
+                    try:
+                        if isinstance(created, str):
+                            from dateutil import parser as date_parser
+                            return date_parser.parse(created).timestamp()
+                        return created.timestamp() if hasattr(created, 'timestamp') else 0
+                    except:
+                        pass
+                
+                # Last resort: use ID (newer IDs are typically higher)
+                return art.get("id", "")
+            
+            sorted_articles = sorted(title_articles, key=sort_key, reverse=True)
+            unique_articles.append(sorted_articles[0])  # Keep the first (newest) one
+    
+    return unique_articles
+
+
 @router.get("/today", response_model=DailyEditionResponse)
 async def get_today_articles():
     """Get today's daily edition with all articles from PocketBase."""
@@ -108,9 +168,15 @@ async def get_today_articles():
         sort="-published_at",
     )
     
+    # Filter duplicate articles (keep only latest version of each original_title)
+    unique_articles = filter_duplicate_articles(articles)
+    
+    if len(unique_articles) < len(articles):
+        print(f"[articles_pb/today] Filtered {len(articles) - len(unique_articles)} duplicate articles (kept latest versions)")
+    
     # Map PocketBase records to ArticleResponse
     article_responses = []
-    for article in articles:
+    for article in unique_articles:
         article_responses.append(ArticleResponse(
             id=article["id"],
             original_title=article["original_title"],
@@ -197,9 +263,15 @@ async def get_latest_edition():
             articles = all_articles[:50]  # Limit to 50 most recent
             print(f"DEBUG: Using {len(articles)} most recent articles as fallback")
     
+    # Filter duplicate articles (keep only latest version of each original_title)
+    unique_articles = filter_duplicate_articles(articles)
+    
+    if len(unique_articles) < len(articles):
+        print(f"[articles_pb/latest] Filtered {len(articles) - len(unique_articles)} duplicate articles (kept latest versions)")
+    
     # Map PocketBase records to ArticleResponse
     article_responses = []
-    for article in articles:
+    for article in unique_articles:
         article_responses.append(ArticleResponse(
             id=article["id"],
             original_title=article["original_title"],

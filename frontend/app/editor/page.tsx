@@ -29,6 +29,7 @@ import { useMobile } from "@/lib/hooks/useMobile";
 import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, Trophy, BookOpen, Menu, Printer, Calendar } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
+import { useAchievements } from "@/context/AchievementsContext";
 import toast from "react-hot-toast";
 
 // Admin email - only this user can fetch new scoops
@@ -86,9 +87,21 @@ function SubLeadArticle({
   const [showControls, setShowControls] = useState(false);
   const [showVariantMenu, setShowVariantMenu] = useState(false);
 
-  const variantText = article.processed_variants[variant] || article.processed_variants.factual;
-  const headline = variantText.split(/[.!?]/)[0] || article.original_title;
-  const body = variantText;
+  // Handle both old format (string) and new format (object with title and body)
+  const variantData = article.processed_variants[variant] || article.processed_variants.factual;
+  let headline: string;
+  let body: string;
+  
+  if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+    // New format: object with title and body
+    headline = variantData.title || article.original_title;
+    body = variantData.body || "";
+  } else {
+    // Old format: just a string
+    const variantText = typeof variantData === "string" ? variantData : "";
+    headline = variantText.split(/[.!?]/)[0] || article.original_title;
+    body = variantText;
+  }
 
   return (
     <article
@@ -198,9 +211,21 @@ function SidebarArticle({
   const [showControls, setShowControls] = useState(false);
   const [showVariantMenu, setShowVariantMenu] = useState(false);
 
-  const variantText = article.processed_variants[variant] || article.processed_variants.factual;
-  const headline = variantText.split(/[.!?]/)[0] || article.original_title;
-  const body = variantText;
+  // Handle both old format (string) and new format (object with title and body)
+  const variantData = article.processed_variants[variant] || article.processed_variants.factual;
+  let headline: string;
+  let body: string;
+  
+  if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+    // New format: object with title and body
+    headline = variantData.title || article.original_title;
+    body = variantData.body || "";
+  } else {
+    // Old format: just a string
+    const variantText = typeof variantData === "string" ? variantData : "";
+    headline = variantText.split(/[.!?]/)[0] || article.original_title;
+    body = variantText;
+  }
 
   return (
     <article
@@ -298,9 +323,21 @@ function NewspaperArticle({
   const [showControls, setShowControls] = useState(false);
   const [showVariantMenu, setShowVariantMenu] = useState(false);
 
-  const variantText = article.processed_variants[variant] || article.processed_variants.factual;
-  const headline = variantText.split(/[.!?]/)[0] || article.original_title;
-  const body = variantText;
+  // Handle both old format (string) and new format (object with title and body)
+  const variantData = article.processed_variants[variant] || article.processed_variants.factual;
+  let headline: string;
+  let body: string;
+  
+  if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+    // New format: object with title and body
+    headline = variantData.title || article.original_title;
+    body = variantData.body || "";
+  } else {
+    // Old format: just a string
+    const variantText = typeof variantData === "string" ? variantData : "";
+    headline = variantText.split(/[.!?]/)[0] || article.original_title;
+    body = variantText;
+  }
 
   return (
     <article
@@ -627,9 +664,21 @@ function RowArticle({
   const [showControls, setShowControls] = useState(false);
   const [showVariantMenu, setShowVariantMenu] = useState(false);
 
-  const variantText = article.processed_variants[variant] || article.processed_variants.factual;
-  const headline = variantText.split(/[.!?]/)[0] || article.original_title;
-  const body = variantText;
+  // Handle both old format (string) and new format (object with title and body)
+  const variantData = article.processed_variants[variant] || article.processed_variants.factual;
+  let headline: string;
+  let body: string;
+  
+  if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+    // New format: object with title and body
+    headline = variantData.title || article.original_title;
+    body = variantData.body || "";
+  } else {
+    // Old format: just a string
+    const variantText = typeof variantData === "string" ? variantData : "";
+    headline = variantText.split(/[.!?]/)[0] || article.original_title;
+    body = variantText;
+  }
 
   // Size-based styling
   const headlineSize =
@@ -959,6 +1008,7 @@ export default function EditorPage() {
   const router = useRouter();
   const pathname = usePathname();
   const { isGuest } = useAuth();
+  const { checkAndUnlock } = useAchievements();
   const [dailyEdition, setDailyEdition] = useState<DailyEdition | null>(null);
   const [ads, setAds] = useState<Ad[]>([]);
   const [loading, setLoading] = useState(true);
@@ -982,6 +1032,7 @@ export default function EditorPage() {
   const [isPublishing, setIsPublishing] = useState(false);
   const [paperSentToday, setPaperSentToday] = useState(false);
   const [isTestMode, setIsTestMode] = useState(false); // Flag to prevent auto-disable after test simulation
+  const justPublishedRef = useRef(false); // Track if we just published to prevent race condition
   const [showPaperSentPopup, setShowPaperSentPopup] = useState(false);
   const [lastPublishedEdition, setLastPublishedEdition] = useState<PublishedEditionResponse | null>(null);
   const [yesterdayEdition, setYesterdayEdition] = useState<PublishedEditionResponse | null>(null);
@@ -1173,9 +1224,10 @@ export default function EditorPage() {
 
   // Check if paper has been sent today (disable grid if so)
   // Skip this check if we're in test mode (after simulating next day)
+  // Also skip if we just published (to prevent race conditions)
   useEffect(() => {
     async function checkPaperSentToday() {
-      if (isGuest || isTestMode) return; // Skip check in test mode
+      if (isGuest || isTestMode || justPublishedRef.current) return; // Skip check in test mode or if we just published
       
       try {
         const hasSent = await hasPublishedToday();
@@ -1418,6 +1470,20 @@ export default function EditorPage() {
       setRefreshError(msg);
       setRefreshProgress("");
       console.error("Failed to refresh scoops:", e);
+      
+      // Show user-friendly error message
+      let userMessage = msg;
+      if (msg.includes("CLOUDFLARE_TIMEOUT") || msg.includes("524") || msg.includes("taking too long")) {
+        userMessage = "The backend is taking too long to respond. The ingestion job may still be running in the background. Please check the backend logs or try again in a few minutes.";
+      } else if (msg.includes("BACKEND_UNAVAILABLE") || msg.includes("502") || msg.includes("not responding")) {
+        userMessage = "The backend server is not responding. Please check: 1) Is the backend running? (cd backend && source venv/bin/activate && uvicorn app.main:app --reload), 2) Is the Cloudflare tunnel active? (npm run host:public), 3) Check backend logs for errors.";
+      } else if (msg.length > 200) {
+        userMessage = msg.substring(0, 200) + "...";
+      }
+      
+      toast.error(`Failed to refresh scoops: ${userMessage}`, {
+        duration: 8000,
+      });
     } finally {
       setIsRefreshing(false);
     }
@@ -1700,23 +1766,43 @@ export default function EditorPage() {
         adId: string | null;
         headline?: string;  // NEW: Store displayed headline
         body?: string;      // NEW: Store displayed body text
+        row?: number;       // Row number: 1, 2, or 3
+        position?: number;  // Position within row: 0, 1, or 2
       }> = [];
 
       // Add row1 items
-      zoneState.row1.forEach((item) => {
+      // Position is 1-based: row1 has 1 slot at position 1
+      zoneState.row1.forEach((item, arrayIndex) => {
         if (item) {
           if (item.type === "article") {
             const article = dailyEdition?.articles.find(a => a.id === item.articleId);
             if (article) {
               const variant = item.variant || "factual";
-              const variantText = article.processed_variants?.[variant] || "";
+              const variantData = article.processed_variants?.[variant] || article.processed_variants?.factual || "";
+              // Handle both old format (string) and new format (object with title and body)
+              let headline: string;
+              let body: string;
+              
+              if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+                // New format: object with title and body
+                headline = variantData.title || article.original_title;
+                body = variantData.body || "";
+              } else {
+                // Old format: just a string
+                const variantText = typeof variantData === "string" ? variantData : "";
+                headline = variantText.split(/[.!?]/)[0] || article.original_title;
+                body = variantText;
+              }
+              
               placedItems.push({
                 articleId: item.articleId,
                 variant: variant,
                 isAd: false,
                 adId: null,
-                headline: article.original_title,
-                body: variantText,
+                headline: headline,
+                body: body,
+                row: 1,
+                position: arrayIndex + 1, // 1-based: position 1
               });
             }
           } else {
@@ -1729,6 +1815,8 @@ export default function EditorPage() {
                 adId: item.adId,
                 headline: ad.company,
                 body: ad.description,
+                row: 1,
+                position: arrayIndex + 1, // 1-based: position 1
               });
             }
           }
@@ -1736,20 +1824,38 @@ export default function EditorPage() {
       });
 
       // Add row2 items
-      zoneState.row2.forEach((item) => {
+      // Position is 1-based: row2 has 2 slots at positions 1, 2
+      zoneState.row2.forEach((item, arrayIndex) => {
         if (item) {
           if (item.type === "article") {
             const article = dailyEdition?.articles.find(a => a.id === item.articleId);
             if (article) {
               const variant = item.variant || "factual";
-              const variantText = article.processed_variants?.[variant] || "";
+              const variantData = article.processed_variants?.[variant] || article.processed_variants?.factual || "";
+              // Handle both old format (string) and new format (object with title and body)
+              let headline: string;
+              let body: string;
+              
+              if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+                // New format: object with title and body
+                headline = variantData.title || article.original_title;
+                body = variantData.body || "";
+              } else {
+                // Old format: just a string
+                const variantText = typeof variantData === "string" ? variantData : "";
+                headline = variantText.split(/[.!?]/)[0] || article.original_title;
+                body = variantText;
+              }
+              
               placedItems.push({
                 articleId: item.articleId,
                 variant: variant,
                 isAd: false,
                 adId: null,
-                headline: article.original_title,
-                body: variantText,
+                headline: headline,
+                body: body,
+                row: 2,
+                position: arrayIndex + 1, // 1-based: positions 1, 2
               });
             }
           } else {
@@ -1762,6 +1868,8 @@ export default function EditorPage() {
                 adId: item.adId,
                 headline: ad.company,
                 body: ad.description,
+                row: 2,
+                position: arrayIndex + 1, // 1-based: positions 1, 2
               });
             }
           }
@@ -1769,20 +1877,38 @@ export default function EditorPage() {
       });
 
       // Add row3 items
-      zoneState.row3.forEach((item) => {
+      // Position is 1-based: row3 has 3 slots at positions 1, 2, 3
+      zoneState.row3.forEach((item, arrayIndex) => {
         if (item) {
           if (item.type === "article") {
             const article = dailyEdition?.articles.find(a => a.id === item.articleId);
             if (article) {
               const variant = item.variant || "factual";
-              const variantText = article.processed_variants?.[variant] || "";
+              const variantData = article.processed_variants?.[variant] || article.processed_variants?.factual || "";
+              // Handle both old format (string) and new format (object with title and body)
+              let headline: string;
+              let body: string;
+              
+              if (typeof variantData === "object" && variantData !== null && "title" in variantData && "body" in variantData) {
+                // New format: object with title and body
+                headline = variantData.title || article.original_title;
+                body = variantData.body || "";
+              } else {
+                // Old format: just a string
+                const variantText = typeof variantData === "string" ? variantData : "";
+                headline = variantText.split(/[.!?]/)[0] || article.original_title;
+                body = variantText;
+              }
+              
               placedItems.push({
                 articleId: item.articleId,
                 variant: variant,
                 isAd: false,
                 adId: null,
-                headline: article.original_title,
-                body: variantText,
+                headline: headline,
+                body: body,
+                row: 3,
+                position: arrayIndex + 1, // 1-based: positions 1, 2, 3
               });
             }
           } else {
@@ -1795,6 +1921,8 @@ export default function EditorPage() {
                 adId: item.adId,
                 headline: ad.company,
                 body: ad.description,
+                row: 3,
+                position: arrayIndex + 1, // 1-based: positions 1, 2, 3
               });
             }
           }
@@ -1816,10 +1944,16 @@ export default function EditorPage() {
       );
       
       // Mark that paper has been sent today
+      justPublishedRef.current = true; // Set flag to prevent race condition
       setPaperSentToday(true);
       
       // Disable test mode after publishing (new paper sent)
       setIsTestMode(false);
+      
+      // Clear the flag after a short delay to allow backend to update
+      setTimeout(() => {
+        justPublishedRef.current = false;
+      }, 2000);
       
       // Clear draft after successful publication
       clearDraft();
@@ -1835,6 +1969,17 @@ export default function EditorPage() {
       const allEditions = await getAllPublishedEditions();
       if (allEditions.length > 0) {
         setLastPublishedEdition(allEditions[0]);
+      }
+      
+      // Check achievements after publishing
+      try {
+        await checkAndUnlock("publish", {
+          placed_items: placedItems,
+          stats: publishResult.stats,
+        });
+      } catch (error) {
+        console.error("Failed to check achievements:", error);
+        // Don't block publish flow if achievements fail
       }
       
       toast.success("Newspaper sent to press successfully!", {

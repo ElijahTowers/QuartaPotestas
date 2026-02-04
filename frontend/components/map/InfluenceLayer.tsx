@@ -69,26 +69,7 @@ export function InfluenceLayer() {
         const data = await response.json();
         setGeoData(data);
         
-        // Debug: Log first few features to see property structure
-        if (data.features && data.features.length > 0) {
-          console.log("[InfluenceLayer] GeoJSON loaded. Sample feature properties:", data.features[0].properties);
-          console.log("[InfluenceLayer] Sample feature ID:", data.features[0].id);
-          // Log all properties from first feature
-          console.log("[InfluenceLayer] All property keys from first feature:", Object.keys(data.features[0].properties || {}));
-          // Log a few country codes from GeoJSON
-          const sampleCodes = data.features.slice(0, 10).map((f: GeoJSONFeature) => ({
-            name: f.properties?.name,
-            ISO_A2: f.properties?.ISO_A2,
-            iso_a2: f.properties?.iso_a2,
-            ISO2: f.properties?.ISO2,
-            iso2: f.properties?.iso2,
-            ISO: f.properties?.ISO,
-            iso: f.properties?.iso,
-            id: f.id,
-            allProps: Object.keys(f.properties || {}),
-          }));
-          console.log("[InfluenceLayer] Sample country codes from GeoJSON:", sampleCodes);
-        }
+        // GeoJSON loaded successfully
       } catch (error) {
         console.error("Failed to fetch GeoJSON:", error);
       }
@@ -119,7 +100,6 @@ export function InfluenceLayer() {
         }
 
         if (!token) {
-          console.log("[InfluenceLayer] No token available");
           setLoading(false);
           return;
         }
@@ -155,8 +135,6 @@ export function InfluenceLayer() {
         }
 
         const counts = await response.json();
-        console.log("[InfluenceLayer] Article counts by country (raw):", counts);
-        console.log("[InfluenceLayer] Country codes from API (raw):", Object.keys(counts));
         
         // Normalize country codes to uppercase for matching
         const normalizedCounts: Record<string, number> = {};
@@ -164,8 +142,6 @@ export function InfluenceLayer() {
           normalizedCounts[code.toUpperCase()] = count as number;
         }
         
-        console.log("[InfluenceLayer] Article counts by country (normalized):", normalizedCounts);
-        console.log("[InfluenceLayer] Country codes from API (normalized):", Object.keys(normalizedCounts));
         setArticleCounts(normalizedCounts);
       } catch (error: any) {
         // Handle errors gracefully
@@ -216,7 +192,6 @@ export function InfluenceLayer() {
     // If we got a 3-letter code (from feature.id), convert it to 2-letter code
     if (countryCode.length === 3 && ISO3_TO_ISO2[countryCode]) {
       countryCode = ISO3_TO_ISO2[countryCode];
-      console.log(`[InfluenceLayer] Converted 3-letter code ${feature.id} to 2-letter code ${countryCode}`);
     }
     
     return countryCode;
@@ -229,11 +204,6 @@ export function InfluenceLayer() {
     const countryCode = getCountryCode(feature);
     const count = articleCounts[countryCode] || 0;
     const color = getCountryColor(countryCode);
-
-    // Debug logging for countries with articles
-    if (count > 0) {
-      console.log(`[InfluenceLayer] Styling ${feature.properties?.name || countryCode}: countryCode=${countryCode}, count=${count}, color=${color}`);
-    }
 
     return {
       fillColor: color,
@@ -297,11 +267,6 @@ export function InfluenceLayer() {
     const countryCode = getCountryCode(feature);
     const countryName = feature.properties?.name || countryCode;
     const count = articleCounts[countryCode] || 0;
-    
-    // Debug logging for countries with articles
-    if (count > 0) {
-      console.log(`[InfluenceLayer] onEachFeature ${countryName}: countryCode=${countryCode}, count=${count}, available keys:`, Object.keys(feature.properties || {}));
-    }
 
     const popupText = `<div style="text-align: center; font-family: serif;">
       <strong>${countryName}</strong><br/>

@@ -293,13 +293,21 @@ Primary country/region:"""
 
 Given the following news article, create THREE DISTINCTLY DIFFERENT variants of the same story.
 
-CRITICAL REQUIREMENT: You MUST provide ALL THREE variants. The JSON response MUST contain exactly these keys: "factual", "sensationalist", "propaganda". Each variant must be 50-100 words.
+CRITICAL REQUIREMENT: You MUST provide ALL THREE variants. The JSON response MUST contain exactly these keys: "factual", "sensationalist", "propaganda". Each variant must be an object with "title" (5-10 words) and "body" (50-100 words).
 
 IMPORTANT: Each variant MUST be UNIQUE and DIFFERENT from the others. They should have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants.
 
-1. FACTUAL: Write a dry, boring, objective news report. Just the facts. No emotion. Use neutral language. (50-100 words)
-2. SENSATIONALIST: Write a fear-mongering, clickbait version. Make it dramatic and alarming. Use exclamation marks, urgent language, and emotional words like "shocking", "devastating", "terrifying". (50-100 words)
-3. PROPAGANDA: Write a version that praises the government/institutions. Make it positive and supportive. Emphasize progress, success, and official responses. Use words like "authorities", "officials", "successful", "effective". (50-100 words)
+1. FACTUAL: Write a dry, boring, objective news report. Just the facts. No emotion. Use neutral language.
+   - Title: Objective, neutral headline (5-10 words)
+   - Body: Factual report (50-100 words)
+
+2. SENSATIONALIST: Write a fear-mongering, clickbait version. Make it dramatic and alarming. Use exclamation marks, urgent language, and emotional words like "shocking", "devastating", "terrifying".
+   - Title: Dramatic, attention-grabbing headline with emotional words (5-10 words)
+   - Body: Sensationalist report (50-100 words)
+
+3. PROPAGANDA: Write a version that praises the government/institutions. Make it positive and supportive. Emphasize progress, success, and official responses. Use words like "authorities", "officials", "successful", "effective".
+   - Title: Positive, supportive headline (5-10 words)
+   - Body: Propaganda report (50-100 words)
 
 Additionally, extract:
 - TOPIC_TAGS: List of topic tags (e.g., ["WAR", "TECH", "ECONOMY", "POLITICS", "CLIMATE", "HEALTH"])
@@ -345,9 +353,18 @@ Article Content: {content}
 
 Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
 {{
-    "factual": "50-100 word factual version...",
-    "sensationalist": "50-100 word sensationalist version...",
-    "propaganda": "50-100 word propaganda version...",
+    "factual": {{
+        "title": "Objective headline (5-10 words)",
+        "body": "50-100 word factual version..."
+    }},
+    "sensationalist": {{
+        "title": "Dramatic headline (5-10 words)",
+        "body": "50-100 word sensationalist version..."
+    }},
+    "propaganda": {{
+        "title": "Positive headline (5-10 words)",
+        "body": "50-100 word propaganda version..."
+    }},
     "tags": ["TAG1", "TAG2"],
     "sentiment": "positive|negative|neutral",
     "location_city": "City Name",
@@ -393,7 +410,7 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. CRITICAL: All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must be UNIQUE and DIFFERENT from each other. Each variant must have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with three keys: 'factual', 'sensationalist', 'propaganda'. Each variant key must contain an object with all 8 faction keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each faction value must be an integer from -10 to +10 representing how that faction would react to that specific variant of the story."
+                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. CRITICAL: All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must be objects with 'title' (5-10 words) and 'body' (50-100 words). Each variant must be UNIQUE and DIFFERENT from each other. Each variant must have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with three keys: 'factual', 'sensationalist', 'propaganda'. Each variant key must contain an object with all 8 faction keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each faction value must be an integer from -10 to +10 representing how that faction would react to that specific variant of the story."
                     },
                     {
                         "role": "user",
@@ -478,11 +495,11 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
             if result is None:
                 try:
                     # Extract fields using regex as last resort
-                    # Use non-greedy matching with DOTALL to handle multiline strings
-                    # Match until we find the closing quote (handling escaped quotes)
-                    factual_match = re.search(r'"factual"\s*:\s*"((?:[^"\\]|\\.)*)"', result_text, re.DOTALL)
-                    sensationalist_match = re.search(r'"sensationalist"\s*:\s*"((?:[^"\\]|\\.)*)"', result_text, re.DOTALL)
-                    propaganda_match = re.search(r'"propaganda"\s*:\s*"((?:[^"\\]|\\.)*)"', result_text, re.DOTALL)
+                    # New structure: each variant is an object with "title" and "body"
+                    # Try to match both old format (string) and new format (object)
+                    factual_match = re.search(r'"factual"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|\{([^}]*)\})', result_text, re.DOTALL)
+                    sensationalist_match = re.search(r'"sensationalist"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|\{([^}]*)\})', result_text, re.DOTALL)
+                    propaganda_match = re.search(r'"propaganda"\s*:\s*(?:"((?:[^"\\]|\\.)*)"|\{([^}]*)\})', result_text, re.DOTALL)
                     tags_match = re.search(r'"tags"\s*:\s*\[(.*?)\]', result_text, re.DOTALL)
                     sentiment_match = re.search(r'"sentiment"\s*:\s*"([^"]*)"', result_text)
                     location_match = re.search(r'"location_city"\s*:\s*"([^"]*)"', result_text)
@@ -493,20 +510,61 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                     
                     result = {}
                     if factual_match:
-                        factual_text = factual_match.group(1)
-                        # Unescape JSON string (handle \\n, \\", etc.)
-                        factual_text = factual_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-                        result["factual"] = factual_text
+                        # Check if it's an object (new format) or string (old format)
+                        if factual_match.group(2):  # Object format
+                            obj_text = factual_match.group(2)
+                            title_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', obj_text)
+                            body_match = re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)"', obj_text, re.DOTALL)
+                            if title_match and body_match:
+                                result["factual"] = {
+                                    "title": title_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\'),
+                                    "body": body_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                }
+                            else:
+                                # Fallback: treat as old format
+                                factual_text = factual_match.group(1) if factual_match.group(1) else ""
+                                factual_text = factual_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                result["factual"] = factual_text
+                        else:  # String format (old)
+                            factual_text = factual_match.group(1)
+                            factual_text = factual_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                            result["factual"] = factual_text
                     if sensationalist_match:
-                        sensationalist_text = sensationalist_match.group(1)
-                        # Unescape JSON string
-                        sensationalist_text = sensationalist_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-                        result["sensationalist"] = sensationalist_text
+                        if sensationalist_match.group(2):  # Object format
+                            obj_text = sensationalist_match.group(2)
+                            title_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', obj_text)
+                            body_match = re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)"', obj_text, re.DOTALL)
+                            if title_match and body_match:
+                                result["sensationalist"] = {
+                                    "title": title_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\'),
+                                    "body": body_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                }
+                            else:
+                                sensationalist_text = sensationalist_match.group(1) if sensationalist_match.group(1) else ""
+                                sensationalist_text = sensationalist_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                result["sensationalist"] = sensationalist_text
+                        else:  # String format (old)
+                            sensationalist_text = sensationalist_match.group(1)
+                            sensationalist_text = sensationalist_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                            result["sensationalist"] = sensationalist_text
                     if propaganda_match:
-                        propaganda_text = propaganda_match.group(1)
-                        # Unescape JSON string
-                        propaganda_text = propaganda_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
-                        result["propaganda"] = propaganda_text
+                        if propaganda_match.group(2):  # Object format
+                            obj_text = propaganda_match.group(2)
+                            title_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', obj_text)
+                            body_match = re.search(r'"body"\s*:\s*"((?:[^"\\]|\\.)*)"', obj_text, re.DOTALL)
+                            if title_match and body_match:
+                                result["propaganda"] = {
+                                    "title": title_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\'),
+                                    "body": body_match.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                }
+                            else:
+                                propaganda_text = propaganda_match.group(1) if propaganda_match.group(1) else ""
+                                propaganda_text = propaganda_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                result["propaganda"] = propaganda_text
+                        else:  # String format (old)
+                            propaganda_text = propaganda_match.group(1)
+                            propaganda_text = propaganda_text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                            result["propaganda"] = propaganda_text
                     if tags_match:
                         # Try to parse tags array
                         try:
@@ -532,60 +590,91 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 fallback_content = content[:200] if len(content) > 200 else content
                 if not fallback_content or fallback_content.strip() == "":
                     fallback_content = f"News report: {title}. {content[:150]}"
+                fallback_title = title[:50] if len(title) > 50 else title
                 
-                # Extract variants with validation
-                factual = result.get("factual", "").strip()
-                sensationalist = result.get("sensationalist", "").strip()
-                propaganda = result.get("propaganda", "").strip()
+                # Helper function to normalize variant (handle both old string format and new object format)
+                def normalize_variant(variant_data, variant_type):
+                    """Normalize variant to new format: {title: str, body: str}"""
+                    if isinstance(variant_data, dict):
+                        # Already in new format
+                        variant_title = variant_data.get("title", "").strip()
+                        variant_body = variant_data.get("body", "").strip()
+                        if not variant_title:
+                            variant_title = fallback_title
+                        if not variant_body:
+                            variant_body = fallback_content
+                        return {"title": variant_title, "body": variant_body}
+                    elif isinstance(variant_data, str):
+                        # Old format: just body text, use original title
+                        variant_body = variant_data.strip()
+                        if not variant_body:
+                            variant_body = fallback_content
+                        return {"title": fallback_title, "body": variant_body}
+                    else:
+                        # Missing or invalid, use fallback
+                        return {"title": fallback_title, "body": fallback_content}
                 
-                # Debug: Log variant lengths and first 50 chars to see if they're different
+                # Extract and normalize variants
+                factual_raw = result.get("factual", "")
+                sensationalist_raw = result.get("sensationalist", "")
+                propaganda_raw = result.get("propaganda", "")
+                
+                factual = normalize_variant(factual_raw, "factual")
+                sensationalist = normalize_variant(sensationalist_raw, "sensationalist")
+                propaganda = normalize_variant(propaganda_raw, "propaganda")
+                
+                # Debug: Log variant info
                 print(f"DEBUG: Article '{title[:50]}...' variants:")
-                print(f"  Factual length: {len(factual)}, preview: {factual[:50]}...")
-                print(f"  Sensationalist length: {len(sensationalist)}, preview: {sensationalist[:50]}...")
-                print(f"  Propaganda length: {len(propaganda)}, preview: {propaganda[:50]}...")
+                print(f"  Factual: title='{factual['title'][:30]}...', body length={len(factual['body'])}")
+                print(f"  Sensationalist: title='{sensationalist['title'][:30]}...', body length={len(sensationalist['body'])}")
+                print(f"  Propaganda: title='{propaganda['title'][:30]}...', body length={len(propaganda['body'])}")
                 
                 # Check if variants are identical (which shouldn't happen)
-                # If they are, we need to regenerate or use fallbacks
                 variants_identical = False
-                if factual and sensationalist and factual.strip() == sensationalist.strip():
-                    print(f"ERROR: Factual and Sensationalist variants are IDENTICAL for article '{title[:50]}...'")
+                if factual["body"].strip() == sensationalist["body"].strip():
+                    print(f"ERROR: Factual and Sensationalist body variants are IDENTICAL for article '{title[:50]}...'")
                     variants_identical = True
-                if factual and propaganda and factual.strip() == propaganda.strip():
-                    print(f"ERROR: Factual and Propaganda variants are IDENTICAL for article '{title[:50]}...'")
+                if factual["body"].strip() == propaganda["body"].strip():
+                    print(f"ERROR: Factual and Propaganda body variants are IDENTICAL for article '{title[:50]}...'")
                     variants_identical = True
-                if sensationalist and propaganda and sensationalist.strip() == propaganda.strip():
-                    print(f"ERROR: Sensationalist and Propaganda variants are IDENTICAL for article '{title[:50]}...'")
+                if sensationalist["body"].strip() == propaganda["body"].strip():
+                    print(f"ERROR: Sensationalist and Propaganda body variants are IDENTICAL for article '{title[:50]}...'")
                     variants_identical = True
                 
                 # If variants are identical, regenerate them with different fallbacks
-                if variants_identical and factual:
+                if variants_identical:
                     print(f"WARNING: Regenerating variants because they are identical")
-                    # Use the factual as base but modify for other variants
-                    base_text = factual.strip()
-                    if not sensationalist or sensationalist.strip() == factual.strip():
-                        # Create a more dramatic version
-                        sensationalist = f"BREAKING: {base_text[:50]}... SHOCKING DEVELOPMENT! This dramatic turn of events has sent shockwaves through the community. Details are still emerging, but sources confirm this is a major story that will have far-reaching consequences."
-                    if not propaganda or propaganda.strip() == factual.strip():
-                        # Create a more positive/government-friendly version
-                        propaganda = f"Official Statement: {base_text[:50]}... Authorities are working diligently to address this matter. Officials have confirmed that proper protocols are being followed and the situation is under control. The government is committed to transparency and public safety."
+                    base_body = factual["body"].strip()
+                    if sensationalist["body"].strip() == factual["body"].strip():
+                        sensationalist = {
+                            "title": f"BREAKING: {factual['title']}",
+                            "body": f"BREAKING: {base_body[:50]}... SHOCKING DEVELOPMENT! This dramatic turn of events has sent shockwaves through the community. Details are still emerging, but sources confirm this is a major story that will have far-reaching consequences."
+                        }
+                    if propaganda["body"].strip() == factual["body"].strip():
+                        propaganda = {
+                            "title": f"Official Statement: {factual['title']}",
+                            "body": f"Official Statement: {base_body[:50]}... Authorities are working diligently to address this matter. Officials have confirmed that proper protocols are being followed and the situation is under control. The government is committed to transparency and public safety."
+                        }
                 
-                # Safety Net: Ensure all three variants exist
-                # If factual is missing or empty, use original content
-                if not factual:
-                    factual = fallback_content
-                    print(f"Warning: 'factual' variant missing for article '{title[:50]}...', using fallback")
+                # Safety Net: Ensure all three variants exist with both title and body
+                if not factual.get("title") or not factual.get("body"):
+                    factual = {"title": fallback_title, "body": fallback_content}
+                    print(f"Warning: 'factual' variant incomplete for article '{title[:50]}...', using fallback")
                 
-                # If sensationalist is missing or empty, DON'T use factual - generate a different version
-                if not sensationalist:
-                    print(f"Warning: 'sensationalist' variant missing for article '{title[:50]}...', generating fallback")
-                    # Create a more dramatic version as fallback
-                    sensationalist = f"BREAKING: {factual[:50]}... [DRAMATIC UPDATE] This shocking development has sent shockwaves through the community!"
+                if not sensationalist.get("title") or not sensationalist.get("body"):
+                    print(f"Warning: 'sensationalist' variant incomplete for article '{title[:50]}...', generating fallback")
+                    sensationalist = {
+                        "title": f"BREAKING: {factual['title']}",
+                        "body": f"BREAKING: {factual['body'][:50]}... [DRAMATIC UPDATE] This shocking development has sent shockwaves through the community!"
+                    }
                 
                 # If propaganda is missing or empty, DON'T use factual - generate a different version
-                if not propaganda:
-                    print(f"Warning: 'propaganda' variant missing for article '{title[:50]}...', generating fallback")
-                    # Create a more positive/government-friendly version as fallback
-                    propaganda = f"Official Report: {factual[:50]}... [POSITIVE SPIN] Authorities are working diligently to address this matter and ensure public safety."
+                if not propaganda.get("title") or not propaganda.get("body"):
+                    print(f"Warning: 'propaganda' variant incomplete for article '{title[:50]}...', generating fallback")
+                    propaganda = {
+                        "title": f"Official Statement: {factual['title']}",
+                        "body": f"Official Report: {factual['body'][:50]}... [POSITIVE SPIN] Authorities are working diligently to address this matter and ensure public safety."
+                    }
                 
                 # Build processed_variants - guaranteed to have all three
                 processed_variants = {

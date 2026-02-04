@@ -14,9 +14,10 @@ import UsernameEditor from "@/components/UsernameEditor";
 import NewspaperNameEditor from "@/components/NewspaperNameEditor";
 import { motion } from "framer-motion";
 import { useTutorial } from "@/context/TutorialContext";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Trophy } from "lucide-react";
 import MorningReport from "@/components/MorningReport";
 import NewspaperAnimation from "@/components/NewspaperAnimation";
+import Achievements from "@/components/Achievements";
 
 export default function HubPage() {
   const router = useRouter();
@@ -56,6 +57,7 @@ export default function HubPage() {
     }, 300);
   };
   const [isShopOpen, setIsShopOpen] = useState(false);
+  const [isAchievementsOpen, setIsAchievementsOpen] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
   const [audienceScores, setAudienceScores] = useState<AudienceScores | null>(null);
@@ -219,16 +221,28 @@ export default function HubPage() {
                 transition={{ duration: 0.4, delay: 0.2 }}
                 className="mt-4"
               >
-                <button
-                  onClick={handleStartTutorial}
-                  className="px-6 py-2 bg-[#8b6f47] text-[#f4e4bc] rounded hover:bg-[#a68a5a] transition-colors font-mono text-sm font-bold flex items-center gap-2 mx-auto shadow-lg"
-                  style={{
-                    boxShadow: "0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
-                  }}
-                >
-                  <BookOpen className="w-4 h-4" />
-                  {hasCompleted ? "Restart Tutorial" : "Start Tutorial"}
-                </button>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    onClick={handleStartTutorial}
+                    className="px-6 py-2 bg-[#8b6f47] text-[#f4e4bc] rounded hover:bg-[#a68a5a] transition-colors font-mono text-sm font-bold flex items-center gap-2 shadow-lg"
+                    style={{
+                      boxShadow: "0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    {hasCompleted ? "Restart Tutorial" : "Start Tutorial"}
+                  </button>
+                  <button
+                    onClick={() => setIsAchievementsOpen(true)}
+                    className="px-6 py-2 bg-[#d4af37] text-[#1a0f08] rounded hover:bg-[#e5c04a] transition-colors font-mono text-sm font-bold flex items-center gap-2 shadow-lg"
+                    style={{
+                      boxShadow: "0 4px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <Trophy className="w-4 h-4" />
+                    Achievements
+                  </button>
+                </div>
               </motion.div>
             </div>
 
@@ -484,6 +498,7 @@ export default function HubPage() {
       
       {/* Shop Modal */}
       <ShopModal isOpen={isShopOpen} onClose={() => setIsShopOpen(false)} />
+      <Achievements isOpen={isAchievementsOpen} onClose={() => setIsAchievementsOpen(false)} />
       
       {/* Yesterday's Paper View with Rotating Animation */}
       <NewspaperAnimation

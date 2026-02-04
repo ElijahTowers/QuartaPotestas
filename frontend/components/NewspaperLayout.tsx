@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getPublicPublishedEdition, type PublicPublishedItem } from "@/lib/api";
-import { Loader2 } from "lucide-react";
+import { Loader2, Share2, Copy, Check } from "lucide-react";
+import { toast } from "react-hot-toast";
 
 interface PublishedItem {
   id: string;
@@ -13,6 +14,8 @@ interface PublishedItem {
   variant?: "factual" | "sensationalist" | "propaganda";
   source?: string; // For ads: company name
   location?: string;
+  row?: number;       // Row number: 1, 2, or 3
+  position?: number;  // Position within row: 0, 1, or 2
 }
 
 interface NewspaperLayoutProps {
@@ -91,6 +94,8 @@ export default function NewspaperLayout({
   const [stats, setStats] = useState<{ cash: number; credibility: number; readers: number } | null>(null);
   const [paperName, setPaperName] = useState<string>(newspaperName);
   const [username, setUsername] = useState<string | null>(null);
+  const [loadedEditionId, setLoadedEditionId] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // Update publishedItems when prop changes (for real-time editor preview)
   useEffect(() => {
@@ -122,12 +127,15 @@ export default function NewspaperLayout({
             variant: item.variant,
             source: item.source,
             location: item.location,
+            row: item.row,
+            position: item.position,
           })
         );
 
         setPublishedItems(mappedItems);
         setPaperName(editionData.newspaper_name || newspaperName);
         setUsername(editionData.username || null);
+        setLoadedEditionId(editionData.id);
 
         const parsedDate = new Date(editionData.date);
         setDate(Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate);
@@ -152,10 +160,46 @@ export default function NewspaperLayout({
     loadEditionData();
   }, [editionId, propEditionNumber, propPublishedItems, newspaperName]);
 
-  // Map published items into row-based layout (matching editor)
-  const row1 = publishedItems.slice(0, 1);
-  const row2 = publishedItems.slice(1, 3);
-  const row3 = publishedItems.slice(3, 6);
+  // Map published items into row-based layout using stored row/position information
+  // If row/position is not available (older editions), fall back to slice-based ordering
+  const hasRowInfo = publishedItems.some(item => item.row !== undefined && item.position !== undefined);
+  
+  let row1: (PublishedItem | undefined)[] = [];
+  let row2: (PublishedItem | undefined)[] = [];
+  let row3: (PublishedItem | undefined)[] = [];
+  
+  if (hasRowInfo) {
+    // Use row/position information to place items correctly
+    // Position is 1-based: Row 1 has position 1, Row 2 has positions 1-2, Row 3 has positions 1-3
+    // IMPORTANT: We must preserve the array structure (including undefined slots) to maintain correct positions
+    const row1Items: (PublishedItem | undefined)[] = [undefined];
+    const row2Items: (PublishedItem | undefined)[] = [undefined, undefined];
+    const row3Items: (PublishedItem | undefined)[] = [undefined, undefined, undefined];
+    
+    publishedItems.forEach(item => {
+      const pos = item.position ?? 1;
+      // Convert 1-based position to 0-based array index
+      const arrayIndex = pos - 1;
+      
+      if (item.row === 1 && pos === 1) {
+        row1Items[0] = item;
+      } else if (item.row === 2 && pos >= 1 && pos <= 2) {
+        row2Items[arrayIndex] = item;
+      } else if (item.row === 3 && pos >= 1 && pos <= 3) {
+        row3Items[arrayIndex] = item;
+      }
+    });
+    
+    // Preserve array structure to maintain correct positions (including undefined slots)
+    row1 = row1Items;
+    row2 = row2Items;
+    row3 = row3Items;
+  } else {
+    // Fallback for older editions without row/position info
+    row1 = publishedItems.slice(0, 1);
+    row2 = publishedItems.slice(1, 3);
+    row3 = publishedItems.slice(3, 6);
+  }
 
   const formatDate = (date: Date): string => {
     return date.toLocaleDateString("en-US", {
@@ -164,6 +208,53 @@ export default function NewspaperLayout({
       month: "long",
       day: "numeric",
     });
+  };
+
+  // Share functionality
+  const handleShare = async () => {
+    if (!loadedEditionId) return;
+
+    const shareUrl = `${window.location.origin}/newspaper?id=${loadedEditionId}`;
+    const shareTitle = `${paperName} - ${formatDate(date)}`;
+    const shareText = `Check out this edition of ${paperName}!`;
+
+    // Try Web Share API first (mobile-friendly)
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl,
+        });
+        toast.success("Shared successfully!", {
+          position: "top-center",
+          duration: 2000,
+        });
+        return;
+      } catch (error) {
+        // User cancelled or error occurred, fall through to copy link
+        if ((error as Error).name !== "AbortError") {
+          console.error("Error sharing:", error);
+        }
+      }
+    }
+
+    // Fallback: Copy link to clipboard
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setLinkCopied(true);
+      toast.success("Link copied to clipboard!", {
+        icon: "📋",
+        duration: 2000,
+        position: "top-center",
+      });
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch (error) {
+      console.error("Failed to copy link:", error);
+      toast.error("Failed to copy link", {
+        position: "top-center",
+      });
+    }
   };
 
   if (loading) {
@@ -203,16 +294,38 @@ export default function NewspaperLayout({
               <span>Readers: {stats.readers.toLocaleString()}</span>
             </div>
           )}
+          {loadedEditionId && (
+            <div className="flex justify-center items-center gap-4 mt-2">
+              <div className="text-xs text-[#999] font-mono">
+                <span>ID: {loadedEditionId}</span>
+              </div>
+              <button
+                onClick={handleShare}
+                className="flex items-center gap-2 px-4 py-2 bg-[#d4af37] text-[#1a0f08] rounded-lg hover:bg-[#e5c04a] transition-colors text-sm font-serif font-semibold border-2 border-[#8b6f47] shadow-sm"
+                title="Share this newspaper"
+              >
+                {linkCopied ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-4 h-4" />
+                    <span>Share</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </header>
 
         {/* Main Content - Match editor layout: 1 / 2 / 3 rows */}
         <div className="space-y-6">
           {/* Row 1: 1 breed item */}
           <div className="grid grid-cols-1 gap-4">
-            {row1.length > 0 ? (
-              row1.map((item) => (
-                <RenderedItem key={`row1-${item.id}`} item={item} size="large" />
-              ))
+            {row1[0] ? (
+              <RenderedItem key={`row1-${row1[0].id}`} item={row1[0]} size="large" />
             ) : (
               <div className="border-2 border-dashed border-[#1a1a1a] p-6 text-center text-[#666] italic">
                 Drop article or ad here

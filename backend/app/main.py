@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import PocketBase API modules
-from app.api import debug_pb as debug, articles_pb as articles, ads, submissions, influence
+from app.api import debug_pb as debug, articles_pb as articles, ads, submissions, influence, achievements
 
 app = FastAPI(
     title="Quarta Potestas API",
@@ -61,6 +61,9 @@ app.include_router(feed.router, prefix="/api")
 # Include published editions router
 from app.api import published_editions
 app.include_router(published_editions.router, prefix="/api")
+
+# Include achievements router
+app.include_router(achievements.router, prefix="/api")
 
 
 @app.on_event("startup")

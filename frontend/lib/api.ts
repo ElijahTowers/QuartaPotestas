@@ -98,6 +98,54 @@ export async function fetchTodayArticles(): Promise<import("@/types/api").DailyE
   return response.json();
 }
 
+/**
+ * Filter duplicate articles by original_title, keeping only the latest version
+ * Uses published_at or created timestamp to determine which is latest
+ */
+function filterDuplicateArticles<T extends { original_title: string; published_at?: string | null; id?: string }>(
+  articles: T[]
+): T[] {
+  if (!articles || articles.length === 0) {
+    return articles;
+  }
+
+  // Group articles by original_title
+  const articlesByTitle = new Map<string, T[]>();
+  for (const article of articles) {
+    const title = article.original_title?.trim() || "";
+    if (!title) continue; // Skip articles without title
+    
+    if (!articlesByTitle.has(title)) {
+      articlesByTitle.set(title, []);
+    }
+    articlesByTitle.get(title)!.push(article);
+  }
+
+  // For each title, keep only the latest article
+  const uniqueArticles: T[] = [];
+  for (const [title, titleArticles] of articlesByTitle.entries()) {
+    if (titleArticles.length === 1) {
+      // Only one article with this title, keep it
+      uniqueArticles.push(titleArticles[0]);
+    } else {
+      // Multiple articles with same title, keep the latest one
+      // Sort by published_at (newest first), then by id (as fallback)
+      const sorted = titleArticles.sort((a, b) => {
+        const aDate = a.published_at ? new Date(a.published_at).getTime() : 0;
+        const bDate = b.published_at ? new Date(b.published_at).getTime() : 0;
+        if (bDate !== aDate) {
+          return bDate - aDate; // Newest first
+        }
+        // If dates are equal or both null, use ID as tiebreaker (newer IDs are typically longer/higher)
+        return (b.id || "").localeCompare(a.id || "");
+      });
+      uniqueArticles.push(sorted[0]); // Keep the first (newest) one
+    }
+  }
+
+  return uniqueArticles;
+}
+
 export async function fetchFeed(): Promise<import("@/types/api").DailyEdition> {
   /**
    * Fetch scoops from the public feed endpoint.
@@ -210,12 +258,19 @@ export async function fetchFeed(): Promise<import("@/types/api").DailyEdition> {
     };
   });
   
+    // Filter duplicate articles (keep only latest version of each original_title)
+    const uniqueArticles = filterDuplicateArticles(articles);
+    
+    if (uniqueArticles.length < articles.length) {
+      console.log(`[fetchFeed] Filtered ${articles.length - uniqueArticles.length} duplicate articles (kept latest versions)`);
+    }
+    
     // Return as DailyEdition format
     return {
       id: 0, // Feed doesn't have a specific edition ID
       date: new Date().toISOString().split("T")[0],
       global_mood: "neutral",
-      articles: articles,
+      articles: uniqueArticles,
     };
   } catch (error) {
     clearTimeout(timeoutId);
@@ -286,6 +341,197 @@ export async function getAudienceImpact(): Promise<import("@/types/api").Audienc
     console.error("Failed to get audience impact:", error);
     return emptyScores;
   }
+}
+
+// ==================== ACHIEVEMENTS API ====================
+
+export interface Achievement {
+  achievement_id: string;
+  name: string;
+  description: string;
+  category: string;
+  rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
+  points: number;
+  unlocked: boolean;
+  unlocked_at?: string | null;
+  progress?: number | null;
+}
+
+export interface AchievementsSummary {
+  unlocked_achievements: string[];
+  total_points: number;
+  achievements: Achievement[];
+  completion_percentage: number;
+}
+
+export interface UnlockResult {
+  unlocked: boolean;
+  already_unlocked?: boolean;
+  achievement?: {
+    id: string;
+    name: string;
+    points: number;
+  };
+}
+
+export interface CheckAchievementsResult {
+  newly_unlocked: Array<{
+    id: string;
+    name: string;
+    points: number;
+  }>;
+  total_unlocked: number;
+}
+
+/**
+ * Get all achievements with user's progress
+ */
+export async function getAllAchievements(): Promise<Achievement[]> {
+  const { getPocketBase } = await import("./pocketbase");
+  const pb = getPocketBase();
+  const token = pb.authStore.token;
+
+  if (!token) {
+    throw new Error("Authentication required");
+  }
+
+  const response = await fetch(
+    getActualApiUrl("/api/achievements/all"),
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "include", // Changed from "omit" to "include" to send cookies
+      mode: "cors",
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    if (response.status === 401 || response.status === 403) {
+      // Token might be expired, clear it
+      pb.authStore.clear();
+    }
+    throw new Error(`Failed to get achievements (${response.status}): ${errorText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Get achievements summary
+ */
+export async function getAchievementsSummary(): Promise<AchievementsSummary> {
+  const { getPocketBase } = await import("./pocketbase");
+  const pb = getPocketBase();
+  const token = pb.authStore.token;
+
+  if (!token) {
+    throw new Error("Authentication required");
+  }
+
+  const response = await fetch(
+    getActualApiUrl("/api/achievements/summary"),
+    {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "include", // Changed from "omit" to "include" to send cookies
+      mode: "cors",
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    if (response.status === 401 || response.status === 403) {
+      // Token might be expired, clear it
+      pb.authStore.clear();
+    }
+    throw new Error(`Failed to get achievements summary (${response.status}): ${errorText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Check and unlock achievements based on game events
+ */
+export async function checkAchievements(
+  eventType: string,
+  eventData: Record<string, any>
+): Promise<CheckAchievementsResult> {
+  const { getPocketBase } = await import("./pocketbase");
+  const pb = getPocketBase();
+  const token = pb.authStore.token;
+
+  if (!token) {
+    throw new Error("Authentication required");
+  }
+
+  const response = await fetchWithErrorHandling(
+    getActualApiUrl("/api/achievements/check"),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "omit",
+      mode: "cors",
+      body: JSON.stringify({
+        event_type: eventType,
+        event_data: eventData,
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to check achievements (${response.status}): ${errorText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Unlock a specific achievement (internal use)
+ */
+export async function unlockAchievement(achievementId: string): Promise<UnlockResult> {
+  const { getPocketBase } = await import("./pocketbase");
+  const pb = getPocketBase();
+  const token = pb.authStore.token;
+
+  if (!token) {
+    throw new Error("Authentication required");
+  }
+
+  const response = await fetchWithErrorHandling(
+    getActualApiUrl(`/api/achievements/unlock/${achievementId}`),
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      credentials: "omit",
+      mode: "cors",
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Failed to unlock achievement (${response.status}): ${errorText}`);
+  }
+
+  return response.json();
 }
 
 /**
@@ -362,23 +608,32 @@ export async function fetchLatestArticles(): Promise<import("@/types/api").Daily
       // Backend returns: { id (string), date, global_mood, articles: [...] }
       // Frontend expects: { id (number), date, global_mood, articles: [...] }
       // Articles have string IDs, edition has number ID
+      const mappedArticles = (data.articles || []).map((article: any) => ({
+        id: String(article.id), // Articles always use string IDs
+        original_title: article.original_title || "",
+        processed_variants: article.processed_variants || { factual: "", sensationalist: "", propaganda: "" },
+        tags: article.tags || { topic_tags: [], sentiment: "neutral" },
+        location_lat: article.location_lat ?? null,
+        location_lon: article.location_lon ?? null,
+        location_city: article.location_city ?? null,
+        date: article.date || data.date || new Date().toISOString().split("T")[0],
+        published_at: article.published_at || null,
+        assistant_comment: article.assistant_comment,
+        audience_scores: article.audience_scores,
+      }));
+      
+      // Filter duplicate articles (keep only latest version of each original_title)
+      const uniqueArticles = filterDuplicateArticles(mappedArticles);
+      
+      if (uniqueArticles.length < mappedArticles.length) {
+        console.log(`[fetchLatestArticles] Filtered ${mappedArticles.length - uniqueArticles.length} duplicate articles (kept latest versions)`);
+      }
+      
       const mappedData = {
         id: typeof data.id === 'string' ? parseInt(data.id) || 0 : (typeof data.id === 'number' ? data.id : 0),
         date: data.date || new Date().toISOString().split("T")[0],
         global_mood: data.global_mood || "neutral",
-        articles: (data.articles || []).map((article: any) => ({
-          id: String(article.id), // Articles always use string IDs
-          original_title: article.original_title || "",
-          processed_variants: article.processed_variants || { factual: "", sensationalist: "", propaganda: "" },
-          tags: article.tags || { topic_tags: [], sentiment: "neutral" },
-          location_lat: article.location_lat ?? null,
-          location_lon: article.location_lon ?? null,
-          location_city: article.location_city ?? null,
-          date: article.date || data.date || new Date().toISOString().split("T")[0],
-          published_at: article.published_at || null,
-          assistant_comment: article.assistant_comment,
-          audience_scores: article.audience_scores,
-        })),
+        articles: uniqueArticles,
       };
       
       console.log(`[fetchLatestArticles] Mapped data:`, mappedData);
@@ -526,6 +781,8 @@ export interface GridPlacement {
   adId: string | null;
   headline?: string;  // NEW: Store displayed headline
   body?: string;  // NEW: Store displayed body text
+  row?: number;       // Row number: 1, 2, or 3
+  position?: number;  // Position within row: 0, 1, or 2
 }
 
 export interface SubmitGridResponse {
@@ -641,8 +898,25 @@ export async function startResetAndIngest(): Promise<{ job_id: string; status: s
     });
 
     if (!response.ok) {
+      // Handle 502 Bad Gateway specifically
+      if (response.status === 502) {
+        throw new Error("BACKEND_UNAVAILABLE: The backend server is not responding. Please check if the backend is running and accessible. This could be due to: 1) Backend crashed or not started, 2) Cloudflare tunnel issue, 3) Backend timeout.");
+      }
+      
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to start ingestion job (${response.status}): ${errorText.substring(0, 200)}`);
+      // Check if it's an HTML error page (like Cloudflare error pages)
+      const isHtmlError = errorText.trim().startsWith("<!DOCTYPE") || errorText.trim().startsWith("<html");
+      
+      if (isHtmlError) {
+        // Extract meaningful info from HTML error pages
+        const titleMatch = errorText.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const title = titleMatch ? titleMatch[1] : "Server Error";
+        throw new Error(`Backend returned ${response.status} error: ${title}. The backend server may be down or experiencing issues.`);
+      }
+      
+      // Truncate very long error messages
+      const truncatedError = errorText.length > 200 ? errorText.substring(0, 200) + "..." : errorText;
+      throw new Error(`Failed to start ingestion job (${response.status}): ${truncatedError}`);
     }
 
     return await response.json();
@@ -698,8 +972,15 @@ export async function getIngestionJobStatus(jobId: string): Promise<{
     });
 
     if (!response.ok) {
+      // Handle Cloudflare 524 timeout specifically
+      if (response.status === 524) {
+        throw new Error("CLOUDFLARE_TIMEOUT: The backend is taking too long to respond. The ingestion job may still be running in the background. Please check the backend logs or try again later.");
+      }
+      
       const errorText = await response.text().catch(() => response.statusText);
-      throw new Error(`Failed to get job status (${response.status}): ${errorText}`);
+      // Truncate very long error messages (like HTML error pages)
+      const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + "..." : errorText;
+      throw new Error(`Failed to get job status (${response.status}): ${truncatedError}`);
     }
 
     return await response.json();
@@ -729,13 +1010,14 @@ export async function resetAndIngestWithPolling(
   const startTime = Date.now();
   
   while (Date.now() - startTime < maxPollTime) {
-    const status = await getIngestionJobStatus(job_id);
-    
-    if (onProgress && status.progress) {
-      onProgress(status.progress, status.status);
-    }
-    
-    if (status.status === "completed") {
+    try {
+      const status = await getIngestionJobStatus(job_id);
+      
+      if (onProgress && status.progress) {
+        onProgress(status.progress, status.status);
+      }
+      
+      if (status.status === "completed") {
       const result = status.result;
       
       // Log timing information for future progress indicators
@@ -794,12 +1076,22 @@ export async function resetAndIngestWithPolling(
       return result;
     }
     
-    if (status.status === "failed") {
-      throw new Error(status.error || "Ingestion job failed");
+      if (status.status === "failed") {
+        throw new Error(status.error || "Ingestion job failed");
+      }
+      
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    } catch (error) {
+      // Handle Cloudflare 524 timeout specifically
+      if (error instanceof Error && error.message.includes("CLOUDFLARE_TIMEOUT")) {
+        // Extract the user-friendly message
+        const timeoutMessage = error.message.replace("CLOUDFLARE_TIMEOUT: ", "");
+        throw new Error(timeoutMessage);
+      }
+      // Re-throw other errors
+      throw error;
     }
-    
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
   
   throw new Error("Ingestion job timed out after 10 minutes");
@@ -1212,6 +1504,8 @@ export interface PublicPublishedItem {
   variant?: "factual" | "sensationalist" | "propaganda";
   source?: string;
   location?: string;
+  row?: number;       // Row number: 1, 2, or 3
+  position?: number;  // Position within row: 0, 1, or 2
 }
 
 export interface PublicEditionResponse {

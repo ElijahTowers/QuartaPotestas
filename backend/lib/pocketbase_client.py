@@ -51,6 +51,8 @@ class PocketBaseClient:
             headers = {}
             if self.admin_token:
                 headers["Authorization"] = f"Bearer {self.admin_token}"
+            else:
+                print(f"WARNING: No admin token available for creating record in {collection}")
             
             # Use collection API (admin API may not exist in 0.36.1)
             response = await self.client.post(
@@ -61,11 +63,31 @@ class PocketBaseClient:
             if response.status_code == 200:
                 return response.json()
             else:
-                print(f"Failed to create record: {response.status_code} - {response.text}")
-                return None
+                error_text = response.text
+                error_msg = f"Failed to create record in {collection}: {response.status_code} - {error_text}"
+                print(f"ERROR: {error_msg}")
+                # For users collection, try using the admin API endpoint
+                if collection == "users" and response.status_code != 200:
+                    print(f"INFO: Attempting to create user via admin API...")
+                    # Try admin API endpoint for user creation
+                    admin_response = await self.client.post(
+                        f"/api/collections/users/records",
+                        json=data,
+                        headers=headers,
+                    )
+                    if admin_response.status_code == 200:
+                        return admin_response.json()
+                    else:
+                        error_msg = f"Failed to create user via admin API: {admin_response.status_code} - {admin_response.text}"
+                        print(f"ERROR: {error_msg}")
+                raise Exception(error_msg)
         except Exception as e:
-            print(f"Error creating record: {e}")
-            return None
+            # Re-raise if it's already our custom exception
+            if isinstance(e, Exception) and "Failed to create" in str(e):
+                raise
+            error_msg = f"Error creating record in {collection}: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            raise Exception(error_msg)
 
     async def get_list(
         self,
@@ -137,15 +159,21 @@ class PocketBaseClient:
                 # If we only get metadata, the collection might have view restrictions
                 # Check if we need to expand fields or use a different approach
                 if items and len(items[0].keys()) <= 3:
-                    print(f"WARNING: Only got metadata fields. Collection permissions may need adjustment.")
-                    # Try to get full record by ID
-                    if items:
-                        record_id = items[0].get("id")
+                    print(f"WARNING: Only got metadata fields. Fetching full records individually...")
+                    # Fetch full records by ID for all items
+                    full_items = []
+                    for item in items:
+                        record_id = item.get("id")
                         if record_id:
                             full_record = await self.get_record_by_id(collection, record_id)
                             if full_record:
-                                print(f"DEBUG: Full record keys: {list(full_record.keys())}")
-                                items[0] = full_record
+                                full_items.append(full_record)
+                            else:
+                                # Fallback to metadata if we can't get full record
+                                full_items.append(item)
+                        else:
+                            full_items.append(item)
+                    return full_items
                 
                 return items
             else:

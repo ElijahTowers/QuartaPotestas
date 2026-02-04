@@ -30,7 +30,8 @@ def get_auth_service() -> AuthService:
 
 
 # Security scheme for Bearer token
-security = HTTPBearer()
+# auto_error=False allows the dependency to return None if token is missing
+security = HTTPBearer(auto_error=False)
 
 
 # Request/Response Models
@@ -82,12 +83,19 @@ class DailyEditionResponse(BaseModel):
 
 # Dependency to get current user from token
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
     """
     Verify token and return current user info.
     Decodes the JWT token to extract user ID and other claims.
     """
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     token = credentials.credentials
     
     if not token:

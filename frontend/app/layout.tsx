@@ -4,6 +4,7 @@ import { Merriweather } from "next/font/google";
 import { GameProvider } from "@/context/GameContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { TutorialProvider } from "@/context/TutorialContext";
+import { AchievementsProvider } from "@/context/AchievementsContext";
 import { Toaster } from "react-hot-toast";
 import TelemetryTracker from "@/components/analytics/Tracker";
 import PreAlphaBanner from "@/components/PreAlphaBanner";
@@ -52,34 +53,36 @@ export default function RootLayout({
             <DevOverlayController />
             <GuestModeBanner />
             <GameProvider>
-              <TelemetryTracker />
-              {children}
-              <Tutorial />
-              <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 4000,
-                style: {
-                  background: "#1a0f08",
-                  color: "#e6d5ac",
-                  border: "1px solid #8b6f47",
-                  fontFamily: "Georgia, serif",
-                },
-                success: {
-                  iconTheme: {
-                    primary: "#4ade80",
-                    secondary: "#1a0f08",
-                  },
-                },
-                error: {
-                  iconTheme: {
-                    primary: "#ef4444",
-                    secondary: "#1a0f08",
-                  },
-                },
-              }}
-            />
-          </GameProvider>
+              <AchievementsProvider>
+                <TelemetryTracker />
+                {children}
+                <Tutorial />
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    duration: 4000,
+                    style: {
+                      background: "#1a0f08",
+                      color: "#e6d5ac",
+                      border: "1px solid #8b6f47",
+                      fontFamily: "Georgia, serif",
+                    },
+                    success: {
+                      iconTheme: {
+                        primary: "#4ade80",
+                        secondary: "#1a0f08",
+                      },
+                    },
+                    error: {
+                      iconTheme: {
+                        primary: "#ef4444",
+                        secondary: "#1a0f08",
+                      },
+                    },
+                  }}
+                />
+              </AchievementsProvider>
+            </GameProvider>
           </TutorialProvider>
         </AuthProvider>
       </body>

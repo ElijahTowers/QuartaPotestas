@@ -5,6 +5,15 @@ import { useAuth } from "./AuthContext";
 import { getNewspaperName, updateNewspaperName, getGameState, updateGameState } from "@/lib/api";
 import toast from "react-hot-toast";
 
+// Import achievements context (will be available if AchievementsProvider is mounted)
+let achievementsContext: any = null;
+try {
+  const { useAchievements } = require("@/context/AchievementsContext");
+  achievementsContext = useAchievements;
+} catch (e) {
+  // Achievements context not available, will be null
+}
+
 interface GameContextType {
   newspaperName: string;
   setNewspaperName: (name: string) => void;
@@ -119,8 +128,23 @@ export function GameProvider({ children }: { children: ReactNode }) {
         updateGameState({ 
           treasury: newTreasury, 
           purchased_upgrades: newUpgrades 
-        }).then(() => {
+        }).then(async () => {
           toast.success("Upgrade purchased!", { duration: 2000 });
+          
+          // Check achievements after purchase
+          try {
+            if (achievementsContext) {
+              const { checkAndUnlock } = achievementsContext();
+              await checkAndUnlock("shop_purchase", {
+                upgrade_id: upgradeId,
+                cost: cost,
+                total_upgrades: newUpgrades.length,
+              });
+            }
+          } catch (error) {
+            console.error("Failed to check achievements:", error);
+            // Don't block purchase flow if achievements fail
+          }
         }).catch((error) => {
           console.error("Failed to save upgrade purchase:", error);
           toast.error("Failed to save upgrade purchase", { duration: 3000 });

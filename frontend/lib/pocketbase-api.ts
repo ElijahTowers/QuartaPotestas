@@ -91,7 +91,7 @@ export async function fetchLatestArticles(): Promise<DailyEdition> {
 
     // Map PocketBase records to Article format
     // Note: PocketBase IDs are strings, but we convert to number for compatibility
-    const mappedArticles: Article[] = articles.map((item: any) => {
+    let mappedArticles: Article[] = articles.map((item: any) => {
       // Parse JSON fields if they're strings
       let processed_variants = item.processed_variants;
       let tags = item.tags;
@@ -143,6 +143,43 @@ export async function fetchLatestArticles(): Promise<DailyEdition> {
         audience_scores: audience_scores || undefined,
       };
     });
+
+    // Filter duplicate articles (keep only latest version of each original_title)
+    const articlesByTitle = new Map<string, Article[]>();
+    for (const article of mappedArticles) {
+      const title = article.original_title?.trim() || "";
+      if (!title) continue;
+      
+      if (!articlesByTitle.has(title)) {
+        articlesByTitle.set(title, []);
+      }
+      articlesByTitle.get(title)!.push(article);
+    }
+
+    // For each title, keep only the latest article
+    const uniqueArticles: Article[] = [];
+    for (const [title, titleArticles] of articlesByTitle.entries()) {
+      if (titleArticles.length === 1) {
+        uniqueArticles.push(titleArticles[0]);
+      } else {
+        // Sort by published_at (newest first), then by id
+        const sorted = titleArticles.sort((a, b) => {
+          const aDate = a.published_at ? new Date(a.published_at).getTime() : 0;
+          const bDate = b.published_at ? new Date(b.published_at).getTime() : 0;
+          if (bDate !== aDate) {
+            return bDate - aDate;
+          }
+          return (b.id || "").localeCompare(a.id || "");
+        });
+        uniqueArticles.push(sorted[0]);
+      }
+    }
+
+    if (uniqueArticles.length < mappedArticles.length) {
+      console.log(`[pocketbase-api] Filtered ${mappedArticles.length - uniqueArticles.length} duplicate articles (kept latest versions)`);
+    }
+    
+    mappedArticles = uniqueArticles;
 
     // Convert edition ID to number (using hash)
     const editionIdHash = edition.id.split('').reduce((acc: number, char: string) => {

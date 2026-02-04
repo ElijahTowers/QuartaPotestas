@@ -18,7 +18,7 @@ import { fetchLatestArticles, resetAndIngestWithPolling } from "@/lib/api";
 import Wire from "@/components/Wire";
 import GameLayout from "@/components/GameLayout";
 import Assistant from "@/components/Assistant";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Search, X } from "lucide-react";
 import ShopModal from "@/components/ShopModal";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
@@ -53,6 +53,7 @@ export default function Home() {
   const [activeDragItem, setActiveDragItem] = useState<Article | null>(null);
   const [isShopOpen, setIsShopOpen] = useState(false);
   const [subtitleIndex, setSubtitleIndex] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Thematic subtitle messages
   const wireSubtitles = [
@@ -208,7 +209,19 @@ export default function Home() {
       setRefreshError(msg);
       setRefreshProgress("");
       console.error("Failed to refresh scoops:", e);
-      toast.error(`Failed to refresh scoops: ${msg}`, { duration: 5000 });
+      
+      // Show user-friendly error message
+      let userMessage = msg;
+      if (msg.includes("CLOUDFLARE_TIMEOUT") || msg.includes("524")) {
+        userMessage = "The backend is taking too long to respond. The ingestion job may still be running in the background. Please check the backend logs or try again in a few minutes.";
+      } else if (msg.includes("BACKEND_UNAVAILABLE") || msg.includes("502") || msg.includes("not responding")) {
+        userMessage = "The backend server is not responding. Please check: 1) Is the backend running? (cd backend && source venv/bin/activate && uvicorn app.main:app --reload), 2) Is the Cloudflare tunnel active? (npm run host:public), 3) Check backend logs for errors.";
+      } else if (msg.length > 200) {
+        // Truncate very long error messages
+        userMessage = msg.substring(0, 200) + "...";
+      }
+      
+      toast.error(`Failed to refresh scoops: ${userMessage}`, { duration: 8000 });
     } finally {
       setIsRefreshing(false);
     }
@@ -272,7 +285,48 @@ export default function Home() {
   };
 
   // Filter articles - no grid filtering needed since grid moved to /editor
-  const availableArticles = dailyEdition?.articles || [];
+  // Filter articles based on search term
+  const filterArticles = (articles: Article[]) => {
+    if (!searchTerm.trim()) {
+      return articles;
+    }
+
+    const searchLower = searchTerm.toLowerCase();
+    
+    return articles.filter((article) => {
+      // Search in title
+      const titleMatch = article.original_title.toLowerCase().includes(searchLower);
+      
+      // Search in location
+      const locationMatch = article.location_city?.toLowerCase().includes(searchLower) || false;
+      
+      // Search in tags
+      const tagMatch = article.tags.topic_tags.some((tag) => tag.toLowerCase().includes(searchLower));
+      
+      // Search in sentiment
+      const sentimentMatch = article.tags.sentiment?.toLowerCase().includes(searchLower) || false;
+      
+      // Search in assistant comment
+      const commentMatch = article.assistant_comment?.toLowerCase().includes(searchLower) || false;
+      
+      // Search in variant titles/bodies (if available)
+      const variantMatch = 
+        (typeof article.processed_variants?.factual === 'object' && 
+         (article.processed_variants.factual.title?.toLowerCase().includes(searchLower) ||
+          article.processed_variants.factual.body?.toLowerCase().includes(searchLower))) ||
+        (typeof article.processed_variants?.sensationalist === 'object' &&
+         (article.processed_variants.sensationalist.title?.toLowerCase().includes(searchLower) ||
+          article.processed_variants.sensationalist.body?.toLowerCase().includes(searchLower))) ||
+        (typeof article.processed_variants?.propaganda === 'object' &&
+         (article.processed_variants.propaganda.title?.toLowerCase().includes(searchLower) ||
+          article.processed_variants.propaganda.body?.toLowerCase().includes(searchLower))) ||
+        false;
+      
+      return titleMatch || locationMatch || tagMatch || sentimentMatch || commentMatch || variantMatch;
+    });
+  };
+
+  const availableArticles = filterArticles(dailyEdition?.articles || []);
 
   return (
     <ProtectedRoute allowGuest={true}>
@@ -386,10 +440,45 @@ export default function Home() {
                 
                 {/* Mobile Scoop Carousel - Bottom of screen */}
                 {isMobile && (
-                  <div className="h-64 bg-[#1a0f08] border-t-2 border-[#8b6f47] paper-texture flex-shrink-0 overflow-hidden">
-                    <div className="h-full overflow-x-auto overflow-y-hidden scrollbar-hide" style={{ scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}>
-                      <div className="flex gap-4 px-4 py-4 h-full" style={{ scrollSnapType: "x mandatory" }}>
-                        {availableArticles.map((article) => (
+                  <div className="bg-[#1a0f08] border-t-2 border-[#8b6f47] paper-texture flex-shrink-0 overflow-hidden flex flex-col">
+                    {/* Search Bar for Mobile */}
+                    <div className="p-3 border-b border-[#8b6f47] bg-[#1a0f08] flex-shrink-0">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#8b6f47]" />
+                        <input
+                          type="text"
+                          placeholder="Search scoops..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          className="w-full pl-9 pr-8 py-2 bg-[#3a2418] border border-[#8b6f47] rounded text-[#e8dcc6] placeholder:text-[#8b6f47] text-sm focus:outline-none focus:border-[#d4af37] focus:ring-1 focus:ring-[#d4af37]"
+                        />
+                        {searchTerm && (
+                          <button
+                            onClick={() => setSearchTerm("")}
+                            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-[#8b6f47] hover:text-[#d4af37] transition-colors"
+                            aria-label="Clear search"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-[#8b6f47] mt-2">
+                        {availableArticles.length} of {dailyEdition?.articles.length || 0} scoop{(dailyEdition?.articles.length || 0) !== 1 ? "s" : ""}
+                        {searchTerm && ` matching "${searchTerm}"`}
+                      </p>
+                    </div>
+                    
+                    {/* Carousel */}
+                    <div className="h-64 overflow-x-auto overflow-y-hidden scrollbar-hide" style={{ scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}>
+                      {availableArticles.length === 0 ? (
+                        <div className="h-full flex items-center justify-center px-4">
+                          <p className="text-[#8b6f47] text-sm text-center">
+                            {searchTerm ? `No scoops found matching "${searchTerm}"` : "No scoops available"}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex gap-4 px-4 py-4 h-full" style={{ scrollSnapType: "x mandatory" }}>
+                          {availableArticles.map((article) => (
                           <div
                             key={article.id}
                             onClick={() => handleArticleSelect(article.id)}
@@ -415,7 +504,8 @@ export default function Home() {
                             )}
                           </div>
                         ))}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

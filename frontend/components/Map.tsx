@@ -5,7 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { InfluenceLayer } from "./map/InfluenceLayer";
 import L from "leaflet";
 import type { Article } from "@/types/api";
-import { MapPin, Globe } from "lucide-react";
+import { MapPin, Globe, ChevronLeft, ChevronRight } from "lucide-react";
 
 // Single source of truth for initial/world view
 const INITIAL_VIEW = {
@@ -74,23 +74,18 @@ function PanToSelected({
   };
   
   useEffect(() => {
-    console.log(`[PanToSelected] Effect triggered with selectedArticleId: ${selectedArticleId}`);
-    
     // Safety check: ensure map is still valid
     if (!map || !map.getContainer) {
-      console.log(`[PanToSelected] Map not available, returning early`);
       return;
     }
     
     if (selectedArticleId === null) {
-      console.log(`[PanToSelected] selectedArticleId is null, returning early`);
       lastPannedId.current = null; // Reset when selection is cleared
       return;
     }
     
     // Prevent re-panning if we already panned to this article
     if (lastPannedId.current === selectedArticleId) {
-      console.log(`[PanToSelected] Already panned to this article, skipping`);
       return;
     }
     
@@ -98,16 +93,7 @@ function PanToSelected({
       (article) => article.id === selectedArticleId
     );
     
-    console.log(`[PanToSelected] Found article:`, selectedArticle ? {
-      id: selectedArticle.id,
-      title: selectedArticle.original_title,
-      location_city: selectedArticle.location_city,
-      location_lat: selectedArticle.location_lat,
-      location_lon: selectedArticle.location_lon
-    } : 'NOT FOUND');
-    
     if (!selectedArticle) {
-      console.log(`[PanToSelected] Article not found in articles array`);
       return;
     }
     
@@ -122,21 +108,16 @@ function PanToSelected({
     const isGlobalByCoords = selectedArticle.location_lat === 0 && selectedArticle.location_lon === 0;
     const isGlobal = isGlobalByCity || isGlobalByCoords;
     
-    console.log(`[PanToSelected] Location check - locationCity: "${locationCity}", isGlobalByCity: ${isGlobalByCity}, isGlobalByCoords: ${isGlobalByCoords}, isGlobal: ${isGlobal}`);
-    
     if (isGlobal) {
       // For global/unknown articles, pan to the global pin location (0, 0)
       const globalPinLocation: [number, number] = [0, 0];
       const globalZoom = 2; // Zoom level to clearly see the global pin
-      
-      console.log(`[PanToSelected] Global/Unknown article detected: "${selectedArticle.location_city}" - panning to global pin at [0, 0]`);
       
       // Mark this article as panned to prevent re-panning
       lastPannedId.current = selectedArticleId;
       
       // Pan immediately to the global pin location (no animation for instant feedback)
       map.setView(globalPinLocation, globalZoom, { animate: false });
-      console.log(`[PanToSelected] setView called with [0, 0], zoom: ${globalZoom}`);
       
       // For global articles, open popup immediately (no delay since we use setView with animate: false)
       // Use requestAnimationFrame to ensure map has updated, then try immediately
@@ -162,7 +143,6 @@ function PanToSelected({
                 const isOpen = markerRef.isPopupOpen ? markerRef.isPopupOpen() : false;
                 if (!isOpen) {
                   markerRef.openPopup();
-                  console.log(`[PanToSelected] ✅ Popup opened immediately for global article ${selectedArticleId}`);
                 }
               }
             } catch (error) {
@@ -189,7 +169,6 @@ function PanToSelected({
     // For non-global articles, we need coordinates (check for null/undefined, not falsy, since 0 is valid)
     if (selectedArticle.location_lat === null || selectedArticle.location_lat === undefined ||
         selectedArticle.location_lon === null || selectedArticle.location_lon === undefined) {
-      console.log(`[PanToSelected] Article has no coordinates: lat=${selectedArticle.location_lat}, lon=${selectedArticle.location_lon}`);
       return;
     }
     
@@ -204,12 +183,10 @@ function PanToSelected({
       zoomLevel = 4; // Wider zoom for regions
       centerLat = selectedArticle.location_lat;
       centerLon = selectedArticle.location_lon;
-      console.log(`[PanToSelected] Regional article detected: "${selectedArticle.location_city}" - zooming to region view`);
     } else {
       zoomLevel = 6; // Closer zoom for specific cities
       centerLat = selectedArticle.location_lat;
       centerLon = selectedArticle.location_lon;
-      console.log(`[PanToSelected] City article detected: "${selectedArticle.location_city}" - zooming to city view`);
     }
     
     // Mark this article as panned to prevent re-panning
@@ -223,7 +200,6 @@ function PanToSelected({
         duration: 1.0, // Animation duration in seconds
       }
     );
-    console.log(`[PanToSelected] flyTo called with [${centerLat}, ${centerLon}], zoom: ${zoomLevel}`);
     
     // Open the popup after a short delay to allow the map to pan
     // Wait for marker to be available in markerRefs (it's added asynchronously)
@@ -234,15 +210,10 @@ function PanToSelected({
       retryCount++;
       const markerRef = markerRefs.current.get(selectedArticleId);
       
-      console.log(`[PanToSelected] Attempting to open popup (attempt ${retryCount}/${maxRetries}) for article ${selectedArticleId}`);
-      console.log(`[PanToSelected] Marker refs available:`, Array.from(markerRefs.current.keys()));
-      console.log(`[PanToSelected] Marker found:`, markerRef ? 'YES' : 'NO');
-      
       if (markerRef && markerRef.getPopup) {
         try {
           // Double-check map is still valid
           if (!map || !map.getContainer) {
-            console.log(`[PanToSelected] Map not valid, aborting popup open`);
             return;
           }
           
@@ -250,15 +221,9 @@ function PanToSelected({
           if (popup) {
             // Check if popup is already open to avoid unnecessary calls
             const isOpen = markerRef.isPopupOpen ? markerRef.isPopupOpen() : false;
-            console.log(`[PanToSelected] Popup exists, isOpen: ${isOpen}`);
             if (!isOpen) {
               markerRef.openPopup();
-              console.log(`[PanToSelected] ✅ Popup opened successfully for article ${selectedArticleId}`);
-            } else {
-              console.log(`[PanToSelected] Popup already open, skipping`);
             }
-          } else {
-            console.log(`[PanToSelected] No popup found on marker`);
           }
         } catch (error) {
           console.warn(`[PanToSelected] Failed to open popup:`, error);
@@ -266,10 +231,7 @@ function PanToSelected({
       } else {
         // Marker not ready yet, retry after a short delay
         if (retryCount < maxRetries) {
-          console.log(`[PanToSelected] Marker not ready, retrying in 100ms...`);
           setTimeout(openPopupWhenReady, 100);
-        } else {
-          console.warn(`[PanToSelected] ⚠️ Max retries reached, marker not found for article ${selectedArticleId}`);
         }
       }
     };
@@ -299,7 +261,6 @@ function MapSizeFixer() {
     const fixSize = () => {
       try {
         map.invalidateSize();
-        console.log("[MapSizeFixer] Map size invalidated");
       } catch (error) {
         console.warn("[MapSizeFixer] Error invalidating size:", error);
       }
@@ -422,34 +383,6 @@ function InitializeWorldView({ selectedArticleId }: { selectedArticleId: string 
       // Explicitly set the view using setView (same method as World View button, but without animation)
       // This ensures the initial view matches exactly what the World View button sets
       map.setView(INITIAL_VIEW.center, INITIAL_VIEW.zoom, { animate: false });
-      
-      console.log(`[InitializeWorldView] 🎯 Explicitly set initial view to:`, {
-        center: INITIAL_VIEW.center,
-        zoom: INITIAL_VIEW.zoom
-      });
-      
-      // Log the actual view after a short delay to verify
-      setTimeout(() => {
-        if (map) {
-          const center = map.getCenter();
-          const zoom = map.getZoom();
-          console.log(`[InitializeWorldView] 📍 ACTUAL INITIAL VIEW (on page refresh):`, {
-            center: [center.lat, center.lng],
-            zoom: zoom,
-            expected: {
-              center: INITIAL_VIEW.center,
-              zoom: INITIAL_VIEW.zoom
-            },
-            difference: {
-              center: [
-                Math.abs(center.lat - INITIAL_VIEW.center[0]),
-                Math.abs(center.lng - INITIAL_VIEW.center[1])
-              ],
-              zoom: Math.abs(zoom - INITIAL_VIEW.zoom)
-            }
-          });
-        }
-      }, 100);
     }
   }, [map]); // Run when map is available
   
@@ -467,37 +400,7 @@ function InitializeWorldView({ selectedArticleId }: { selectedArticleId: string 
 
 // Component to log the initial view when map is ready
 function LogInitialView() {
-  const map = useMap();
-  const hasLogged = useRef(false);
-  
-  useEffect(() => {
-    if (!hasLogged.current && map) {
-      // Wait a bit for map to be fully initialized
-      const timeoutId = setTimeout(() => {
-        const center = map.getCenter();
-        const zoom = map.getZoom();
-        console.log(`[LogInitialView] 📍 MAP CONTAINER INITIAL VIEW (on page refresh):`, {
-          center: [center.lat, center.lng],
-          zoom: zoom,
-          expected: {
-            center: INITIAL_VIEW.center,
-            zoom: INITIAL_VIEW.zoom
-          },
-          difference: {
-            center: [
-              Math.abs(center.lat - INITIAL_VIEW.center[0]),
-              Math.abs(center.lng - INITIAL_VIEW.center[1])
-            ],
-            zoom: Math.abs(zoom - INITIAL_VIEW.zoom)
-          }
-        });
-        hasLogged.current = true;
-      }, 100);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [map]);
-  
+  // Component exists for potential future use, but logging is disabled
   return null;
 }
 
@@ -506,43 +409,8 @@ function ResetMapView() {
   const map = useMap();
   
   const resetToWorldView = () => {
-    // Log current view before reset
-    const beforeCenter = map.getCenter();
-    const beforeZoom = map.getZoom();
-    console.log(`[ResetMapView] 🔄 BEFORE World View button click:`, {
-      center: [beforeCenter.lat, beforeCenter.lng],
-      zoom: beforeZoom
-    });
-    
-    // Log what we're setting it to
-    console.log(`[ResetMapView] 🎯 Setting to INITIAL_VIEW:`, {
-      center: INITIAL_VIEW.center,
-      zoom: INITIAL_VIEW.zoom
-    });
-    
     // Use setView (same as initial load) to ensure exact match - no animation to avoid rounding differences
     map.setView(INITIAL_VIEW.center, INITIAL_VIEW.zoom, { animate: false });
-    
-    // Log the view immediately after setting (no need to wait for animation)
-    setTimeout(() => {
-      const afterCenter = map.getCenter();
-      const afterZoom = map.getZoom();
-      console.log(`[ResetMapView] ✅ AFTER World View button click:`, {
-        center: [afterCenter.lat, afterCenter.lng],
-        zoom: afterZoom,
-        expected: {
-          center: INITIAL_VIEW.center,
-          zoom: INITIAL_VIEW.zoom
-        },
-        difference: {
-          center: [
-            Math.abs(afterCenter.lat - INITIAL_VIEW.center[0]),
-            Math.abs(afterCenter.lng - INITIAL_VIEW.center[1])
-          ],
-          zoom: Math.abs(afterZoom - INITIAL_VIEW.zoom)
-        }
-      });
-    }, 50); // Small delay just to ensure the view is set
   };
   
   return (
@@ -558,7 +426,7 @@ function ResetMapView() {
 }
 
 // Custom marker icon with sepia styling (moved outside component for reuse)
-function createCustomIcon(isSelected: boolean, isGlobal: boolean = false) {
+function createCustomIcon(isSelected: boolean, isGlobal: boolean = false, articleCount: number = 1) {
   // Special icon for global/worldwide articles
   if (isGlobal) {
     return L.divIcon({
@@ -588,17 +456,22 @@ function createCustomIcon(isSelected: boolean, isGlobal: boolean = false) {
   }
   
   // Regular article marker
+  // Show count badge if multiple articles
+  const showCount = articleCount > 1;
+  const markerSize = showCount ? 28 : 24;
+  
   return L.divIcon({
     className: "custom-marker",
     html: `
       <div style="
         background-color: ${isSelected ? "#d4af37" : "#8b6f47"};
-        width: 24px;
-        height: 24px;
+        width: ${markerSize}px;
+        height: ${markerSize}px;
         border-radius: 50% 50% 50% 0;
         transform: rotate(-45deg);
         border: 2px solid ${isSelected ? "#f4e8d0" : "#2a1810"};
         box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        position: relative;
       ">
         <div style="
           transform: rotate(45deg);
@@ -611,11 +484,214 @@ function createCustomIcon(isSelected: boolean, isGlobal: boolean = false) {
           font-size: 12px;
           font-weight: bold;
         ">📰</div>
+        ${showCount ? `
+          <div style="
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            background-color: #d4af37;
+            color: #1a0f08;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            border: 2px solid #2a1810;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            transform: rotate(45deg);
+            z-index: 10;
+          ">${articleCount}</div>
+        ` : ""}
       </div>
     `,
-    iconSize: [24, 24],
-    iconAnchor: [12, 24],
+    iconSize: [markerSize, markerSize],
+    iconAnchor: [markerSize / 2, markerSize],
   });
+}
+
+// Grouped marker component for multiple articles at the same location
+function GroupedMarkerWithPopup({
+  articles,
+  selectedArticleId,
+  onArticleSelect,
+  markerRefs,
+}: {
+  articles: Article[];
+  selectedArticleId: string | null;
+  onArticleSelect: (articleId: string) => void;
+  markerRefs: React.MutableRefObject<globalThis.Map<string, L.Marker>>;
+}) {
+  const markerRef = useRef<L.Marker>(null);
+  const map = useMap();
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  // Use the first article's location (all articles should have the same location)
+  const location = articles[0];
+  const isGlobal = location.location_city?.toLowerCase() === "global";
+  const isSelected = selectedArticleId !== null && articles.some(a => a.id === selectedArticleId);
+  
+  // Reset index when marker is clicked (popup opens)
+  useEffect(() => {
+    if (markerRef.current) {
+      const marker = markerRef.current;
+      const handlePopupOpen = () => {
+        setCurrentIndex(0);
+      };
+      
+      marker.on('popupopen', handlePopupOpen);
+      
+      return () => {
+        marker.off('popupopen', handlePopupOpen);
+      };
+    }
+  }, []);
+  
+  // Register marker refs for all articles in the group
+  useEffect(() => {
+    if (!markerRef.current || !map) {
+      return;
+    }
+
+    const checkAndAddMarker = () => {
+      const marker = markerRef.current;
+      if (!marker) {
+        return false;
+      }
+
+      try {
+        const markerAny = marker as any;
+        const hasGetLatLng = typeof marker.getLatLng === 'function';
+        const hasLeafletId = markerAny?._leaflet_id !== undefined;
+        
+        if (hasGetLatLng && hasLeafletId) {
+          // Register this marker for all articles in the group
+          articles.forEach(article => {
+            markerRefs.current.set(article.id, marker);
+          });
+          return true;
+        }
+        return false;
+      } catch (error) {
+        return false;
+      }
+    };
+
+    let attempts = 0;
+    const maxAttempts = 20;
+    
+    const tryAddMarker = () => {
+      attempts++;
+      if (checkAndAddMarker() || attempts >= maxAttempts) {
+        if (attempts >= maxAttempts) {
+          console.warn(`[GroupedMarkerWithPopup] ⚠️ Max attempts reached for location ${location.location_lat}, ${location.location_lon}`);
+        }
+        return;
+      }
+      setTimeout(tryAddMarker, 50 * attempts);
+    };
+
+    const timeoutId = setTimeout(tryAddMarker, 100);
+    
+    return () => {
+      clearTimeout(timeoutId);
+      articles.forEach(article => {
+        const currentMarker = markerRefs.current.get(article.id);
+        if (currentMarker === markerRef.current) {
+          markerRefs.current.delete(article.id);
+        }
+      });
+    };
+  }, [articles, markerRefs, map, location.location_lat, location.location_lon]);
+  
+  const currentArticle = articles[currentIndex];
+  const canGoPrev = currentIndex > 0;
+  const canGoNext = currentIndex < articles.length - 1;
+  
+  const handlePrev = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (canGoPrev) {
+      setCurrentIndex(prev => prev - 1);
+    }
+  };
+  
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (canGoNext) {
+      setCurrentIndex(prev => prev + 1);
+    }
+  };
+  
+  const handleArticleClick = () => {
+    onArticleSelect(currentArticle.id);
+  };
+  
+  if (location.location_lat === null || location.location_lat === undefined ||
+      location.location_lon === null || location.location_lon === undefined ||
+      isNaN(location.location_lat) || isNaN(location.location_lon)) {
+    return null;
+  }
+  
+  return (
+    <Marker
+      ref={markerRef}
+      position={[location.location_lat, location.location_lon]}
+      icon={createCustomIcon(isSelected, isGlobal, articles.length)}
+      eventHandlers={{
+        click: handleArticleClick,
+      }}
+    >
+      <Popup>
+        <div className="text-sm text-[#2a1810] min-w-[200px]">
+          {/* Navigation header */}
+          {articles.length > 1 && (
+            <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-300">
+              <button
+                onClick={handlePrev}
+                disabled={!canGoPrev}
+                className={`p-1 rounded ${canGoPrev ? 'hover:bg-gray-200 text-gray-700' : 'text-gray-300 cursor-not-allowed'}`}
+                aria-label="Previous article"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="text-xs text-gray-600 font-semibold">
+                {currentIndex + 1} / {articles.length}
+              </span>
+              <button
+                onClick={handleNext}
+                disabled={!canGoNext}
+                className={`p-1 rounded ${canGoNext ? 'hover:bg-gray-200 text-gray-700' : 'text-gray-300 cursor-not-allowed'}`}
+                aria-label="Next article"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          
+          {/* Article content */}
+          <h3 className="font-bold mb-2 font-serif">{currentArticle.original_title}</h3>
+          {currentArticle.location_city && (
+            <p className="text-xs text-gray-600 mb-2">
+              {isGlobal ? "🌍" : "📍"} {currentArticle.location_city}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-1 mb-2">
+            {currentArticle.tags.topic_tags.map((tag) => (
+              <span
+                key={tag}
+                className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs rounded"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 italic">{currentArticle.tags.sentiment}</p>
+        </div>
+      </Popup>
+    </Marker>
+  );
 }
 
 // Individual marker component that can be controlled
@@ -643,7 +719,6 @@ function MarkerWithPopup({
     const checkAndAddMarker = () => {
       const marker = markerRef.current;
       if (!marker) {
-        console.log(`[MarkerWithPopup] Marker ref is null for article ${article.id}`);
         return false;
       }
 
@@ -655,22 +730,16 @@ function MarkerWithPopup({
         // Basic check: marker has getLatLng method (means it's a valid Leaflet marker)
         const hasGetLatLng = typeof marker.getLatLng === 'function';
         const hasLeafletId = markerAny?._leaflet_id !== undefined;
-        const hasMap = markerAny?._map !== null && markerAny?._map !== undefined;
-        
-        console.log(`[MarkerWithPopup] Checking marker ${article.id}: hasGetLatLng=${hasGetLatLng}, hasLeafletId=${hasLeafletId}, hasMap=${hasMap}`);
         
         // Simplified check: just need getLatLng and leaflet_id (map might not be set immediately)
         if (hasGetLatLng && hasLeafletId) {
           // Marker is fully initialized and positioned
           markerRefs.current.set(article.id, marker);
-          console.log(`[MarkerWithPopup] ✅ Successfully registered marker for article ${article.id}`);
-          console.log(`[MarkerWithPopup] Total markers registered: ${markerRefs.current.size}`);
           return true;
         }
         return false;
       } catch (error) {
         // Marker not ready yet or error accessing properties
-        console.warn(`[MarkerWithPopup] Error checking marker ${article.id}:`, error);
         return false;
       }
     };
@@ -681,7 +750,6 @@ function MarkerWithPopup({
     
     const tryAddMarker = () => {
       attempts++;
-      console.log(`[MarkerWithPopup] Attempt ${attempts}/${maxAttempts} to register marker for article ${article.id}`);
       if (checkAndAddMarker() || attempts >= maxAttempts) {
         if (attempts >= maxAttempts) {
           console.warn(`[MarkerWithPopup] ⚠️ Max attempts reached for article ${article.id}, marker not registered`);
@@ -718,7 +786,7 @@ function MarkerWithPopup({
     <Marker
       ref={markerRef}
       position={[article.location_lat, article.location_lon]}
-      icon={createCustomIcon(isSelected, isGlobal)}
+      icon={createCustomIcon(isSelected, isGlobal, 1)}
       eventHandlers={{
         click: () => {
           onArticleSelect(article.id);
@@ -1010,18 +1078,56 @@ export default function Map(props: MapProps) {
         />
         <InfluenceLayer />
         <MapReady>
-          {articlesWithCoords.map((article) => {
-            const isSelected = selectedArticleId === article.id;
-            return (
-              <MarkerWithPopup
-                key={article.id}
-                article={article}
-                isSelected={isSelected}
-                onArticleSelect={onArticleSelect}
-                markerRefs={markerRefs}
-              />
-            );
-          })}
+          {(() => {
+            // Group articles by location (with tolerance for floating point differences)
+            const locationTolerance = 0.0001; // ~11 meters
+            // Use globalThis.Map to avoid conflict with component name
+            const locationGroups = new globalThis.Map<string, Article[]>();
+            
+            articlesWithCoords.forEach(article => {
+              const lat = article.location_lat!;
+              const lon = article.location_lon!;
+              
+              // Round coordinates to tolerance level to group nearby articles
+              const roundedLat = Math.round(lat / locationTolerance) * locationTolerance;
+              const roundedLon = Math.round(lon / locationTolerance) * locationTolerance;
+              const locationKey = `${roundedLat.toFixed(4)},${roundedLon.toFixed(4)}`;
+              
+              if (!locationGroups.has(locationKey)) {
+                locationGroups.set(locationKey, []);
+              }
+              locationGroups.get(locationKey)!.push(article);
+            });
+            
+            // Render grouped markers
+            return Array.from(locationGroups.entries()).map(([locationKey, articles]) => {
+              if (articles.length === 1) {
+                // Single article - use individual marker
+                const article = articles[0];
+                const isSelected = selectedArticleId === article.id;
+                return (
+                  <MarkerWithPopup
+                    key={article.id}
+                    article={article}
+                    isSelected={isSelected}
+                    onArticleSelect={onArticleSelect}
+                    markerRefs={markerRefs}
+                  />
+                );
+              } else {
+                // Multiple articles - use grouped marker
+                return (
+                  <GroupedMarkerWithPopup
+                    key={locationKey}
+                    articles={articles}
+                    selectedArticleId={selectedArticleId}
+                    onArticleSelect={onArticleSelect}
+                    markerRefs={markerRefs}
+                  />
+                );
+              }
+            });
+          })()}
         </MapReady>
       </MapContainer>
     </div>

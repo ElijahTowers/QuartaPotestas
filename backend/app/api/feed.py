@@ -161,14 +161,67 @@ async def get_feed(
                             # No date info, include it
                             filtered_items.append(item)
                 
-                # Ensure uniqueness by ID (remove duplicates)
-                seen_ids = set()
-                unique_items = []
+                # Filter duplicate articles by original_title (keep only latest version)
+                # Group by original_title
+                articles_by_title = {}
                 for item in filtered_items:
-                    item_id = item.get("id")
-                    if item_id and item_id not in seen_ids:
-                        seen_ids.add(item_id)
-                        unique_items.append(item)
+                    title = item.get("original_title", "").strip()
+                    if not title:
+                        continue
+                    
+                    if title not in articles_by_title:
+                        articles_by_title[title] = []
+                    articles_by_title[title].append(item)
+                
+                # For each title, keep only the latest article
+                unique_items = []
+                for title, title_items in articles_by_title.items():
+                    if len(title_items) == 1:
+                        unique_items.append(title_items[0])
+                    else:
+                        # Sort by published_at (newest first), then by created, then by id
+                        def sort_key(item):
+                            pub_at = item.get("published_at")
+                            if pub_at:
+                                try:
+                                    if isinstance(pub_at, str):
+                                        if pub_at.endswith('Z'):
+                                            dt = datetime.fromisoformat(pub_at.replace('Z', '+00:00'))
+                                        elif 'T' in pub_at:
+                                            dt = datetime.fromisoformat(pub_at)
+                                            if dt.tzinfo is None:
+                                                dt = pytz.UTC.localize(dt)
+                                        else:
+                                            dt = datetime.strptime(str(pub_at).split('T')[0], "%Y-%m-%d")
+                                            dt = pytz.UTC.localize(dt.replace(hour=12, minute=0))
+                                        return dt.timestamp()
+                                except:
+                                    pass
+                            
+                            created = item.get("created")
+                            if created:
+                                try:
+                                    if isinstance(created, str):
+                                        if created.endswith('Z'):
+                                            dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                                        elif 'T' in created:
+                                            dt = datetime.fromisoformat(created)
+                                            if dt.tzinfo is None:
+                                                dt = pytz.UTC.localize(dt)
+                                        else:
+                                            dt = datetime.strptime(str(created).split('T')[0], "%Y-%m-%d")
+                                            dt = pytz.UTC.localize(dt.replace(hour=12, minute=0))
+                                        return dt.timestamp()
+                                except:
+                                    pass
+                            
+                            return item.get("id", "")
+                        
+                        sorted_items = sorted(title_items, key=sort_key, reverse=True)
+                        unique_items.append(sorted_items[0])  # Keep the newest one
+                
+                if len(unique_items) < len(filtered_items):
+                    print(f"[feed] Filtered {len(filtered_items) - len(unique_items)} duplicate articles by original_title (kept latest versions)")
                 
                 # Parse JSON fields
                 import json
