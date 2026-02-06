@@ -26,7 +26,7 @@ import NewspaperAnimation from "@/components/NewspaperAnimation";
 import ContentSelectionModal from "@/components/ContentSelectionModal";
 import MobileDrawer from "@/components/MobileDrawer";
 import { useMobile } from "@/lib/hooks/useMobile";
-import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, Trophy, BookOpen, Menu, Printer, Calendar } from "lucide-react";
+import { Loader2, AlertCircle, X, GripVertical, ChevronDown, Newspaper, Megaphone, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, Trophy, BookOpen, Menu, Printer, Calendar, Activity } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
 import { useAchievements } from "@/context/AchievementsContext";
@@ -2890,6 +2890,20 @@ export default function EditorPage() {
             <Trophy className="w-5 h-5" />
             <span className="text-[10px]">Top 5</span>
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => router.push("/monitor")}
+              className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+                pathname === "/monitor"
+                  ? "bg-[#d4af37] text-[#1a0f08]"
+                  : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+              }`}
+              title="System monitor"
+            >
+              <Activity className="w-5 h-5" />
+              <span className="text-[10px]">Monitor</span>
+            </button>
+          )}
           <button
             onClick={() => setIsShopOpen(true)}
             className="w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020] border border-red-600/50 hover:border-red-500"

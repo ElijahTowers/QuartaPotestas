@@ -11,7 +11,7 @@
     "lint": "cd frontend && npm run lint",
     "broadcast": "cd frontend && npm run broadcast",
     "broadcast:pb": "cd frontend && npm run broadcast:pb",
-    "host:public": "cloudflared tunnel --config ops/tunnel/config.yml run quartapotestas-local",
+    "host:public": "cloudflared tunnel --config ops/tunnel/config.yml run",
     "backup": "./ops/backup.sh",
     "restore": "./ops/restore.sh"
   },

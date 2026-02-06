@@ -72,14 +72,15 @@ npm run host:public
 ### Option 2: Direct command
 
 ```bash
-cloudflared tunnel run --config ops/tunnel/config.yml quartapotestas-local
+# From project root (--config must come before "run" in cloudflared 2026+)
+cloudflared tunnel --config ops/tunnel/config.yml run
 ```
 
 ### Option 3: Run as a service (Background)
 
 ```bash
 # macOS (using launchd)
-cloudflared tunnel run --config ops/tunnel/config.yml quartapotestas-local &
+cloudflared tunnel --config ops/tunnel/config.yml run &
 
 # Or install as a system service
 cloudflared service install
@@ -135,6 +136,7 @@ See `ops/tunnel/ssl-setup.md` for detailed instructions.
 - Check that the tunnel ID in `config.yml` matches the actual tunnel ID
 - Verify credentials file exists at the specified path
 - Ensure you're logged in: `cloudflared tunnel login`
+- **PM2 "credentials file doesn't exist":** If the tunnel fails when run via PM2, cloudflared may not expand `~`. In `config.yml`, set `credentials-file` to the full path, e.g. `/Users/yourusername/.cloudflared/3f830e84-45e8-43af-bc98-8f44bd61d085.json`
 
 ### DNS not resolving
 - Wait a few minutes for DNS propagation

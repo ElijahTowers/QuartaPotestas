@@ -1,5 +1,7 @@
 /// <reference path="../pb_data/types.d.ts" />
 migrate((app) => {
+  const existing = app.findCollectionByNameOrId("daily_editions") || app.findCollectionByNameOrId("pbc_189460901");
+  if (existing) return;
   const collection = new Collection({
     "createRule": null,
     "deleteRule": null,

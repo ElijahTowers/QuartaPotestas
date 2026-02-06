@@ -38,8 +38,8 @@ function getApiBaseUrl(): string {
 
 const API_BASE_URL = getApiBaseUrl();
 
-// Helper to get the actual API URL (with proxy support for Cloudflare tunnels)
-function getActualApiUrl(path: string): string {
+// Helper to get the actual API URL (with proxy support for Cloudflare tunnels) – exported for AuthContext
+export function getActualApiUrl(path: string): string {
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname;
     
@@ -834,13 +834,25 @@ export async function submitGrid(
   }
 }
 
-export async function triggerIngest(): Promise<any> {
+/**
+ * Start trigger-ingest (ingest only, no delete). Returns immediately with job_id.
+ * Poll getIngestionJobStatus(job_id) for progress and result. Avoids Cloudflare 524 timeout.
+ */
+export async function triggerIngest(): Promise<{ job_id: string; status: string; message: string }> {
+  let token: string | null = null;
+  try {
+    const { getPocketBase } = await import("./pocketbase");
+    token = getPocketBase().authStore.token;
+  } catch {
+    token = null;
+  }
   try {
     const response = await fetch(getActualApiUrl("/api/debug/trigger-ingest"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       credentials: "omit",
       mode: "cors",

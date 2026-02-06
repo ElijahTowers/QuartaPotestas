@@ -36,19 +36,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check if user is already authenticated
     const authData = pb.authStore.model;
     if (authData && pb.authStore.token) {
-      // Always fetch fresh user data from server to ensure we have latest username
-      // This ensures username updates are visible after refresh
-      pb.collection("users").getOne(authData.id)
-        .then((freshUserData) => {
+      const token = pb.authStore.token;
+      // Prefer backend /api/auth/me (uses PocketBase /api/users/me) to avoid 404 from pb.collection("users").getOne(id)
+      const refreshUser = async () => {
+        try {
+          const { getActualApiUrl } = await import("@/lib/api");
+          const res = await fetch(getActualApiUrl("/api/auth/me"), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const freshUserData = await res.json();
+            setUser(freshUserData);
+            pb.authStore.save(token, freshUserData);
+            return;
+          }
+        } catch {
+          // Backend unreachable, try PocketBase directly
+        }
+        try {
+          const freshUserData = await pb.collection("users").getOne(authData.id);
           setUser(freshUserData);
-          // Update auth store with fresh data
-          pb.authStore.save(pb.authStore.token, freshUserData);
-        })
-        .catch((error) => {
-          console.error("Failed to refresh user data:", error);
-          // Fallback to cached data if refresh fails
+          pb.authStore.save(token, freshUserData);
+        } catch (error: unknown) {
+          // 404/403 when users collection is restricted – use cached data (no console error)
+          const is404 = error && typeof error === "object" && "status" in error && (error as { status: number }).status === 404;
+          if (!is404) {
+            console.error("Failed to refresh user data:", error);
+          }
           setUser(authData);
-        });
+        }
+      };
+      refreshUser();
     } else {
       setUser(authData);
     }

@@ -1,8 +1,8 @@
 /// <reference path="../pb_data/types.d.ts" />
 migrate((app) => {
-  const collection = app.findCollectionByNameOrId("pbc_189460901")
-
-  // update collection data
+  try {
+  const collection = app.findCollectionByNameOrId("daily_editions") || app.findCollectionByNameOrId("pbc_189460901")
+  if (!collection) return
   unmarshal({
     "createRule": "@request.auth.id != \"\" && user = @request.auth.id",
     "deleteRule": "user = @request.auth.id",
@@ -10,12 +10,12 @@ migrate((app) => {
     "updateRule": "user = @request.auth.id",
     "viewRule": "user = @request.auth.id"
   }, collection)
-
   return app.save(collection)
+  } catch (_) {}
 }, (app) => {
-  const collection = app.findCollectionByNameOrId("pbc_189460901")
-
-  // update collection data
+  try {
+  const collection = app.findCollectionByNameOrId("daily_editions") || app.findCollectionByNameOrId("pbc_189460901")
+  if (!collection) return
   unmarshal({
     "createRule": null,
     "deleteRule": null,
@@ -23,6 +23,6 @@ migrate((app) => {
     "updateRule": null,
     "viewRule": null
   }, collection)
-
   return app.save(collection)
+  } catch (_) {}
 })

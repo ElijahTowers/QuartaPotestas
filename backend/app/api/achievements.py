@@ -9,12 +9,13 @@ from datetime import datetime
 import os
 import sys
 import json
+import httpx
 
 # Add parent directory to path to import lib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from lib.pocketbase_client import PocketBaseClient, serialize_for_pb
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_auth_headers
 
 router = APIRouter(prefix="/achievements", tags=["achievements"])
 
@@ -59,6 +60,34 @@ async def get_pb_client() -> PocketBaseClient:
     return _pb_client
 
 
+async def _pb_get_list_with_user_token(
+    collection: str,
+    headers: Dict[str, str],
+    per_page: int = 200,
+    filter_expr: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Fetch list from PocketBase using the user's token (avoids superuser-only API rules)."""
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090").rstrip("/")
+    params = {"perPage": per_page}
+    if filter_expr:
+        params["filter"] = filter_expr
+    async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
+        response = await client.get(
+            f"/api/collections/{collection}/records",
+            params=params,
+            headers=headers,
+        )
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=response.text or f"PocketBase list {collection} failed",
+            )
+        data = response.json()
+        if isinstance(data, dict) and "items" in data:
+            return data["items"]
+        return data if isinstance(data, list) else []
+
+
 class AchievementProgress(BaseModel):
     achievement_id: str
     name: str
@@ -80,21 +109,31 @@ class UserAchievementsResponse(BaseModel):
 
 @router.get("/all", response_model=List[AchievementProgress])
 async def get_all_achievements(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
 ):
-    """Get all achievements with user's progress"""
-    pb = await get_pb_client()
+    """Get all achievements with user's progress. Uses user token for PocketBase to avoid superuser-only rules."""
     user_id = current_user["id"]
-    
-    # Get all achievements
-    all_achievements = await pb.get_list("achievements", per_page=200)
-    
-    # Get user's unlocked achievements
-    user_achievements = await pb.get_list(
-        "user_achievements",
-        filter=f'user = "{user_id}"',
-        per_page=200,
-    )
+    all_achievements: List[Dict[str, Any]] = []
+    user_achievements: List[Dict[str, Any]] = []
+    try:
+        all_achievements = await _pb_get_list_with_user_token("achievements", headers, per_page=200)
+        user_achievements = await _pb_get_list_with_user_token(
+            "user_achievements", headers, per_page=200, filter_expr=f'user = "{user_id}"'
+        )
+    except HTTPException as e:
+        if e.status_code == 403:
+            try:
+                pb = await get_pb_client()
+                all_achievements = await pb.get_list("achievements", per_page=200)
+                user_achievements = await pb.get_list(
+                    "user_achievements", filter=f'user = "{user_id}"', per_page=200
+                )
+            except Exception:
+                # Admin also 403 (e.g. not superuser) or other error – return empty list
+                pass
+        else:
+            raise
     
     unlocked_ids = {ua.get("achievement_id") for ua in user_achievements if ua.get("achievement_id")}
     
@@ -135,39 +174,55 @@ async def get_all_achievements(
     return result
 
 
+def _empty_achievements_summary() -> UserAchievementsResponse:
+    """Return empty summary when PocketBase is inaccessible (e.g. 403 superuser-only)."""
+    return UserAchievementsResponse(
+        unlocked_achievements=[],
+        total_points=0,
+        achievements=[],
+        completion_percentage=0.0,
+    )
+
+
 @router.get("/summary", response_model=UserAchievementsResponse)
 async def get_achievements_summary(
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
 ):
-    """Get summary of user's achievements"""
-    pb = await get_pb_client()
+    """Get summary of user's achievements. Returns empty summary on 403 (e.g. superuser-only collections)."""
     user_id = current_user["id"]
-    
-    # Get all achievements
-    all_achievements = await pb.get_list("achievements", per_page=200)
+    all_achievements: List[Dict[str, Any]] = []
+    user_achievements: List[Dict[str, Any]] = []
+    try:
+        all_achievements = await _pb_get_list_with_user_token("achievements", headers, per_page=200)
+        user_achievements = await _pb_get_list_with_user_token(
+            "user_achievements", headers, per_page=200, filter_expr=f'user = "{user_id}"'
+        )
+    except HTTPException as e:
+        if e.status_code == 403:
+            try:
+                pb = await get_pb_client()
+                all_achievements = await pb.get_list("achievements", per_page=200)
+                user_achievements = await pb.get_list(
+                    "user_achievements", filter=f'user = "{user_id}"', per_page=200
+                )
+            except Exception:
+                return _empty_achievements_summary()
+        else:
+            raise
+    except Exception:
+        return _empty_achievements_summary()
     total_achievements = len(all_achievements)
-    
-    # Get user's unlocked achievements
-    user_achievements = await pb.get_list(
-        "user_achievements",
-        filter=f'user = "{user_id}"',
-        per_page=200,
-    )
-    
     unlocked_ids = [ua.get("achievement_id") for ua in user_achievements if ua.get("achievement_id")]
-    
-    # Calculate total points
     unlocked_achievement_records = [
         a for a in all_achievements if a.get("achievement_id") in unlocked_ids
     ]
     total_points = sum(a.get("points", 0) for a in unlocked_achievement_records)
-    
     completion_percentage = (len(unlocked_ids) / total_achievements * 100) if total_achievements > 0 else 0.0
-    
     return UserAchievementsResponse(
         unlocked_achievements=unlocked_ids,
         total_points=total_points,
-        achievements=[],  # Empty for summary endpoint
+        achievements=[],
         completion_percentage=round(completion_percentage, 2),
     )
 

@@ -1,5 +1,8 @@
 /// <reference path="../pb_data/types.d.ts" />
 migrate((app) => {
+  try {
+    const dailyEditions = app.findCollectionByNameOrId("daily_editions") || app.findCollectionByNameOrId("pbc_189460901");
+    if (!dailyEditions || app.findCollectionByNameOrId("articles")) return;
   const collection = new Collection({
     "createRule": null,
     "deleteRule": null,
@@ -20,7 +23,7 @@ migrate((app) => {
       },
       {
         "cascadeDelete": true,
-        "collectionId": "pbc_189460901",
+        "collectionId": dailyEditions.id,
         "hidden": false,
         "id": "relation2311841597",
         "maxSelect": 1,
@@ -137,8 +140,11 @@ migrate((app) => {
   });
 
   return app.save(collection);
+  } catch (_) {}
 }, (app) => {
-  const collection = app.findCollectionByNameOrId("pbc_4287850865");
-
+  try {
+  const collection = app.findCollectionByNameOrId("pbc_4287850865") || app.findCollectionByNameOrId("articles");
+  if (!collection) return;
   return app.delete(collection);
+  } catch (_) {}
 })

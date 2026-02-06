@@ -2,7 +2,7 @@
 Ingestion Service for PocketBase - Writes articles to PocketBase instead of SQL
 """
 from datetime import date, datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Callable
 import json
 import os
 import sys
@@ -82,6 +82,24 @@ class IngestionServicePB:
             print(f"[IngestionServicePB] ERROR: {error_msg}")
             raise Exception(error_msg)
     
+    async def _get_existing_article_source_urls(self) -> set:
+        """Fetch all articles' source_url from PocketBase (paginated) for incremental RSS check."""
+        seen: set = set()
+        page = 1
+        per_page = 500
+        while True:
+            items = await self.pb.get_list("articles", page=page, per_page=per_page)
+            if not items:
+                break
+            for item in items:
+                url = (item.get("source_url") or "").strip()
+                if url:
+                    seen.add(url)
+            if len(items) < per_page:
+                break
+            page += 1
+        return seen
+    
     def load_ads(self) -> List[dict]:
         """Load predefined ads from JSON file."""
         ads_path = os.path.join(
@@ -97,45 +115,51 @@ class IngestionServicePB:
             print(f"Error loading ads: {e}")
             return []
     
-    async def ingest_daily_articles(self) -> dict:
+    def _step(self, on_step: Optional[Callable[[str], None]], message: str) -> None:
+        """Emit a step message for live monitor if callback provided."""
+        if on_step:
+            try:
+                on_step(message)
+            except Exception:
+                pass
+
+    async def ingest_daily_articles(self, on_step: Optional[Callable[[str], None]] = None) -> dict:
         """
         Main ingestion function that processes articles for the day.
         Writes to PocketBase instead of SQL.
+        on_step: optional callback(message) for live step-by-step progress on monitor.
         """
         today = date.today()
-        
+        self._step(on_step, "Run gestart.")
+
         # Get or create system user for ingestion
+        self._step(on_step, "Systeemgebruiker ophalen…")
         system_user_id = await self._get_or_create_system_user()
-        
-        # Check if today's edition already exists in PocketBase
+
+        # Get or create today's daily edition in PocketBase
+        self._step(on_step, "Dageditie ophalen of aanmaken…")
         existing_editions = await self.pb.get_list(
             "daily_editions",
             filter=f'date = "{today.isoformat()}"',
         )
         
         if existing_editions:
-            existing_edition = existing_editions[0]
-            return {
-                "status": "already_exists",
-                "edition_id": existing_edition["id"],
-                "date": str(today),
-                "message": "Daily edition for today already exists"
+            daily_edition_id = existing_editions[0]["id"]
+            # Continue to fetch RSS and process new articles (duplicates are skipped below)
+        else:
+            # Create new daily edition in PocketBase
+            edition_data = {
+                "date": today.isoformat(),
+                "global_mood": "Neutral",
+                "user": system_user_id,  # Link to system user
             }
-        
-        # Create new daily edition in PocketBase
-        edition_data = {
-            "date": today.isoformat(),
-            "global_mood": "Neutral",
-            "user": system_user_id,  # Link to system user
-        }
-        daily_edition = await self.pb.create_record("daily_editions", edition_data)
-        
-        if not daily_edition:
-            raise Exception("Failed to create daily edition in PocketBase")
-        
-        daily_edition_id = daily_edition["id"]
+            daily_edition = await self.pb.create_record("daily_editions", edition_data)
+            if not daily_edition:
+                raise Exception("Failed to create daily edition in PocketBase")
+            daily_edition_id = daily_edition["id"]
         
         # Fetch articles from RSS feeds
+        self._step(on_step, "RSS-feeds ophalen…")
         try:
             raw_articles = self.rss_service.fetch_all_feeds()
             if not raw_articles:
@@ -143,20 +167,48 @@ class IngestionServicePB:
         except Exception as e:
             print(f"Error fetching RSS feeds: {e}")
             raise Exception(f"Failed to fetch articles from RSS feeds: {e}")
+        self._step(on_step, f"RSS opgehaald: {len(raw_articles)} artikelen.")
+
+        # Get existing article source URLs from PocketBase (RSS link = unique id)
+        self._step(on_step, "Bestaande artikelen in PB vergelijken…")
+        existing_source_urls = await self._get_existing_article_source_urls()
+        new_raw_articles = [
+            a for a in raw_articles
+            if (a.get("link") or "").strip() and (a.get("link") or "").strip() not in existing_source_urls
+        ]
+        skipped_existing = len(raw_articles) - len(new_raw_articles)
+        if skipped_existing:
+            print(f"[IngestionServicePB] Skipping {skipped_existing} articles already in PocketBase (by source_url)")
+        if not new_raw_articles:
+            self._step(on_step, f"Geen nieuwe artikelen. Klaar. ({skipped_existing} al in PB.)")
+            print(f"[IngestionServicePB] No new articles from RSS (all {len(raw_articles)} already in PB). Done.")
+            return {
+                "status": "success",
+                "edition_id": daily_edition_id,
+                "date": str(today),
+                "articles_processed": 0,
+                "ads_available": len(self.load_ads()),
+                "scoop_timings": [],
+                "timing_stats": {"total_seconds": 0, "average_seconds": 0, "min_seconds": 0, "max_seconds": 0, "total_scoops": 0},
+                "skipped_already_in_pb": skipped_existing,
+            }
         
-        # Process articles
+        # Process only new articles
         processed_count = 0
-        articles_to_process = raw_articles[:5] if IngestionServicePB.TEST_MODE else raw_articles
-        if IngestionServicePB.TEST_MODE and len(raw_articles) > 5:
-            print(f"[IngestionServicePB] TEST MODE: Processing only 5 of {len(raw_articles)} articles")
-        
+        articles_to_process = new_raw_articles[:5] if IngestionServicePB.TEST_MODE else new_raw_articles
+        total_to_process = len(articles_to_process)
+        if IngestionServicePB.TEST_MODE and len(new_raw_articles) > 5:
+            print(f"[IngestionServicePB] TEST MODE: Processing only 5 of {len(new_raw_articles)} new articles")
+        self._step(on_step, f"{total_to_process} nieuwe artikelen om te verwerken.")
+
         # Track timing for each scoop
         scoop_timings: List[Dict[str, Any]] = []
-        
+
         for idx, raw_article in enumerate(articles_to_process, start=1):
             scoop_start_time = time.time()
             scoop_title = raw_article.get("title", f"Article {idx}")[:50]  # Truncate for logging
-            
+            self._step(on_step, f"Artikel {idx}/{total_to_process}: {scoop_title}…")
+
             try:
                 step_timings = {}
                 
@@ -272,6 +324,7 @@ class IngestionServicePB:
                 step_timings["check_duplicate"] = round(time.time() - step_start, 2)
                 
                 if existing_articles and len(existing_articles) > 0:
+                    self._step(on_step, f"Artikel {idx}/{total_to_process} overgeslagen (dubbel).")
                     existing_id = existing_articles[0]["id"]
                     existing_date = existing_articles[0].get("date", "unknown")
                     print(f"[IngestionServicePB] ⚠️  Skipping duplicate article: '{title[:50]}...' (already exists: {existing_id}, date: {existing_date})")
@@ -286,10 +339,11 @@ class IngestionServicePB:
                     })
                     continue  # Skip this article
                 
-                # Create article in PocketBase
+                # Create article in PocketBase (include source_url for incremental RSS runs)
                 article_data = serialize_for_pb({
                     "daily_edition_id": daily_edition_id,
                     "original_title": title,
+                    "source_url": (raw_article.get("link") or "").strip(),
                     "processed_variants": ai_result.get("processed_variants", {}),
                     "tags": tags,
                     "location_lat": lat,
@@ -317,6 +371,7 @@ class IngestionServicePB:
                 
                 if article:
                     processed_count += 1
+                    self._step(on_step, f"Artikel {idx}/{total_to_process} opgeslagen.")
                     scoop_timings.append({
                         "scoop_index": idx,
                         "title": scoop_title,
@@ -351,9 +406,11 @@ class IngestionServicePB:
                 print(f"[IngestionServicePB] ❌ Error processing article '{raw_article.get('title', 'Unknown')}': {e} (took {scoop_duration:.2f}s)")
                 continue
         
+        self._step(on_step, f"Klaar. {processed_count} artikelen verwerkt.")
+
         # Load ads (for later use)
         ads = self.load_ads()
-        
+
         # Calculate timing statistics
         total_time = sum(s["duration_seconds"] for s in scoop_timings)
         avg_time = total_time / len(scoop_timings) if scoop_timings else 0
@@ -373,6 +430,7 @@ class IngestionServicePB:
                 "min_seconds": round(min_time, 2),
                 "max_seconds": round(max_time, 2),
                 "total_scoops": len(scoop_timings)
-            }
+            },
+            "skipped_already_in_pb": skipped_existing,
         }
 

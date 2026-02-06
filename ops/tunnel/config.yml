@@ -1,5 +1,5 @@
-tunnel: 3f830e84-45e8-43af-bc98-8f44bd61d085
-credentials-file: ~/.cloudflared/3f830e84-45e8-43af-bc98-8f44bd61d085.json
+tunnel: 38c6c8b1-f17d-4131-b1d6-b7ab7b4d0249
+credentials-file: /Users/lowie/.cloudflared/38c6c8b1-f17d-4131-b1d6-b7ab7b4d0249.json
 
 ingress:
   # Rule 1: Database (PocketBase)

@@ -221,11 +221,15 @@ class PocketBaseClient:
     async def update_record(
         self, collection: str, record_id: str, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Update a record"""
+        """Update a record (uses admin token if set)."""
         try:
+            headers = {}
+            if self.admin_token:
+                headers["Authorization"] = f"Bearer {self.admin_token}"
             response = await self.client.patch(
                 f"/api/collections/{collection}/records/{record_id}",
                 json=data,
+                headers=headers,
             )
             if response.status_code == 200:
                 return response.json()
@@ -237,12 +241,49 @@ class PocketBaseClient:
     async def delete_record(self, collection: str, record_id: str) -> bool:
         """Delete a record"""
         try:
+            headers = {}
+            if self.admin_token:
+                headers["Authorization"] = f"Bearer {self.admin_token}"
             response = await self.client.delete(
-                f"/api/collections/{collection}/records/{record_id}"
+                f"/api/collections/{collection}/records/{record_id}",
+                headers=headers,
             )
             return response.status_code == 204
         except Exception as e:
             print(f"Error deleting record: {e}")
+            return False
+
+    async def ensure_articles_source_url_field(self) -> bool:
+        """
+        Ensure the articles collection has a source_url field (type url).
+        If missing, add it via PATCH so that ingestion can store RSS link.
+        Returns True if the field exists or was added, False on error.
+        """
+        if not self.admin_token:
+            return False
+        try:
+            headers = {"Authorization": f"Bearer {self.admin_token}"}
+            resp = await self.client.get("/api/collections/articles", headers=headers)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            fields = data.get("fields", [])
+            if any(f.get("name") == "source_url" for f in fields):
+                return True
+            new_field = {"name": "source_url", "type": "url", "required": False, "options": {}}
+            updated = {"fields": fields + [new_field]}
+            patch = await self.client.patch(
+                f"/api/collections/{data['id']}",
+                json=updated,
+                headers=headers,
+            )
+            if patch.status_code in (200, 204):
+                print("[PocketBase] Added source_url field to articles collection.")
+                return True
+            print(f"[PocketBase] Failed to add source_url: {patch.status_code} - {patch.text}")
+            return False
+        except Exception as e:
+            print(f"[PocketBase] ensure_articles_source_url_field: {e}")
             return False
 
     async def delete_all_records(self, collection: str) -> bool:

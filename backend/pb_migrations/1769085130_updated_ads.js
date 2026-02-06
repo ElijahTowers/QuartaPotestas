@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 migrate((app) => {
-  const collection = app.findCollectionByNameOrId("pbc_1911549009")
+  const collection = app.findCollectionByNameOrId("ads") || app.findCollectionByNameOrId("pbc_1911549009")
 
   // update collection data
   unmarshal({
@@ -13,7 +13,7 @@ migrate((app) => {
 
   return app.save(collection)
 }, (app) => {
-  const collection = app.findCollectionByNameOrId("pbc_1911549009")
+  const collection = app.findCollectionByNameOrId("ads") || app.findCollectionByNameOrId("pbc_1911549009")
 
   // update collection data
   unmarshal({

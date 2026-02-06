@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, FormEvent, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { Loader2, AlertCircle, Mail, Lock, Newspaper } from "lucide-react";
 import Link from "next/link";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") || "/";
   const { login, register, isAuthenticated, isLoading: authLoading, enterGuestMode } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
@@ -16,12 +18,12 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Redirect if already authenticated (use useEffect to avoid render-time navigation)
+  // Redirect if already authenticated (use redirect param e.g. /monitor)
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
-      router.push("/");
+      router.push(redirectTo);
     }
-  }, [isAuthenticated, authLoading, router]);
+  }, [isAuthenticated, authLoading, router, redirectTo]);
 
   // Show loading state while checking authentication
   if (authLoading) {
@@ -48,7 +50,7 @@ export default function LoginPage() {
     try {
       if (isLogin) {
         await login(email, password);
-        router.push("/");
+        router.push(redirectTo);
       } else {
         if (password !== passwordConfirm) {
           setError("Passwords do not match");
@@ -56,7 +58,7 @@ export default function LoginPage() {
           return;
         }
         await register(email, password, passwordConfirm);
-        router.push("/");
+        router.push(redirectTo);
       }
     } catch (err: any) {
       setError(err.message || "Authentication failed");

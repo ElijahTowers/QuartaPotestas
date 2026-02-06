@@ -12,12 +12,34 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from lib.auth_service import AuthService
+from lib.pocketbase_client import PocketBaseClient
 from app.utils.date_format import format_datetime_dutch, format_date_dutch
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Initialize auth service
 _auth_service: Optional[AuthService] = None
+
+# PocketBase admin client for game state (when user token cannot read/update users collection)
+_pb_client: Optional[PocketBaseClient] = None
+
+
+async def _get_pb_admin_client() -> PocketBaseClient:
+    """Get PocketBase client authenticated as admin (for game state read/update on users collection)."""
+    global _pb_client
+    if _pb_client is None:
+        _pb_client = PocketBaseClient(base_url=os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090"))
+        admin_email = os.getenv("POCKETBASE_ADMIN_EMAIL", "")
+        admin_password = os.getenv("POCKETBASE_ADMIN_PASSWORD", "")
+        if not admin_email or not admin_password:
+            raise HTTPException(
+                status_code=500,
+                detail="POCKETBASE_ADMIN_EMAIL and POCKETBASE_ADMIN_PASSWORD must be set for game state",
+            )
+        ok = await _pb_client.authenticate_admin(admin_email, admin_password)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to authenticate with PocketBase admin")
+    return _pb_client
 
 
 def get_auth_service() -> AuthService:
@@ -130,26 +152,27 @@ async def get_current_user(
         # Try to get email from token first
         email = token_data.get("email")
         
-        # Always fetch user record from PocketBase to get email (more reliable)
+        # Fetch user record from PocketBase to get email (prefer /api/users/me to avoid 404 on restricted users collection)
         if not email:
             try:
                 import httpx
                 pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
-                
-                # Fetch user record using the token
                 async with httpx.AsyncClient(base_url=pocketbase_url, timeout=5.0) as client:
                     response = await client.get(
-                        f"/api/collections/users/records/{user_id}",
+                        "/api/users/me",
                         headers={"Authorization": f"Bearer {token}"},
                     )
+                    if response.status_code != 200 and user_id:
+                        response = await client.get(
+                            f"/api/collections/users/records/{user_id}",
+                            headers={"Authorization": f"Bearer {token}"},
+                        )
                     if response.status_code == 200:
                         user_record = response.json()
                         email = user_record.get("email")
-                        print(f"[DEBUG get_current_user] Fetched email from PocketBase: {email}")
                     else:
                         print(f"[DEBUG get_current_user] Failed to fetch user: {response.status_code} - {response.text}")
             except Exception as e:
-                # If fetching fails, continue without email (will fail admin check)
                 print(f"[DEBUG get_current_user] Warning: Could not fetch user email: {e}")
         
         print(f"[DEBUG get_current_user] User ID: {user_id}, Email: {email}")
@@ -175,6 +198,41 @@ def get_auth_headers(current_user: Dict[str, Any] = Depends(get_current_user)) -
     if not token:
         raise HTTPException(status_code=401, detail="No token available")
     return AuthService.get_authenticated_headers(token)
+
+
+@router.get("/me")
+async def get_me(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    headers: Dict[str, str] = Depends(get_auth_headers),
+):
+    """
+    Return the current user record (from PocketBase /api/users/me).
+    If PocketBase is unreachable or returns an error, return minimal user from token (id, email)
+    so callers (e.g. monitor admin check) can still validate.
+    """
+    import httpx
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+    try:
+        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=10.0) as client:
+            response = await client.get("/api/users/me", headers=headers)
+            if response.status_code == 200:
+                return response.json()
+            if response.status_code in (403, 404) and current_user.get("id"):
+                fallback = await client.get(
+                    f"/api/collections/users/records/{current_user['id']}",
+                    headers=headers,
+                )
+                if fallback.status_code == 200:
+                    return fallback.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[auth/me] PocketBase fetch failed: {e}")
+    # Fallback: return minimal user from token so admin check etc. still works
+    return {
+        "id": current_user.get("id"),
+        "email": current_user.get("email"),
+    }
 
 
 @router.post("/register", response_model=RegisterResponse)
@@ -719,6 +777,50 @@ class GameStateUpdateRequest(BaseModel):
     credibility: Optional[float] = None
 
 
+def _parse_game_state_from_user(user_data: dict) -> "GameStateResponse":
+    """Extract game state fields from a PocketBase user record."""
+    import json
+    treasury = user_data.get("treasury", 0.0) or 0.0
+    purchased_upgrades = user_data.get("purchased_upgrades", []) or []
+    readers = user_data.get("readers", 0) or 0
+    credibility = user_data.get("credibility", 0.0) or 0.0
+    if isinstance(purchased_upgrades, str):
+        try:
+            purchased_upgrades = json.loads(purchased_upgrades)
+        except Exception:
+            purchased_upgrades = []
+    return GameStateResponse(
+        treasury=float(treasury),
+        purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
+        readers=int(readers),
+        credibility=float(credibility),
+    )
+
+
+async def _fetch_current_user_pb(
+    client: "httpx.AsyncClient", headers: Dict[str, str], user_id_from_token: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Fetch current user record from PocketBase. Tries /users/me, then /records/@me, then /records/{id}."""
+    for path in ["/api/users/me", "/api/collections/users/records/@me"]:
+        try:
+            r = await client.get(path, headers=headers)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            continue
+    if user_id_from_token:
+        try:
+            r = await client.get(
+                f"/api/collections/users/records/{user_id_from_token}",
+                headers=headers,
+            )
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+    return None
+
+
 @router.get("/game-state", response_model=GameStateResponse)
 async def get_game_state(
     current_user: Dict[str, Any] = Depends(get_current_user),
@@ -726,55 +828,34 @@ async def get_game_state(
 ):
     """
     Get the current user's game state (treasury, purchased_upgrades, readers, credibility).
-    Requires authentication.
+    Requires authentication. Tries user token first, then admin client to read users collection.
     """
     import httpx
     
-    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
     user_id = current_user.get("id")
-    
-    if not user_id:
-        raise HTTPException(
-            status_code=401,
-            detail="User ID not found in token"
-        )
+    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
     
     try:
         async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
-            # Get user record
-            response = await client.get(
-                f"/api/collections/users/records/{user_id}",
-                headers=headers,
-            )
-            
-            if response.status_code == 200:
-                user_data = response.json()
-                treasury = user_data.get("treasury", 0.0) or 0.0
-                purchased_upgrades = user_data.get("purchased_upgrades", []) or []
-                readers = user_data.get("readers", 0) or 0
-                credibility = user_data.get("credibility", 0.0) or 0.0
-                
-                # Handle JSON string if needed
-                if isinstance(purchased_upgrades, str):
-                    try:
-                        import json
-                        purchased_upgrades = json.loads(purchased_upgrades)
-                    except:
-                        purchased_upgrades = []
-                
-                return GameStateResponse(
-                    treasury=float(treasury),
-                    purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
-                    readers=int(readers),
-                    credibility=float(credibility)
-                )
-            else:
-                # Return defaults on error
-                return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0)
-                
-    except Exception as e:
-        # Return defaults on error
-        return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0)
+            user_data = await _fetch_current_user_pb(client, headers, user_id)
+            if user_data:
+                return _parse_game_state_from_user(user_data)
+        # Fallback: admin client can read users collection
+        if user_id:
+            try:
+                pb = await _get_pb_admin_client()
+                user_data = await pb.get_record_by_id("users", user_id)
+                if user_data:
+                    return _parse_game_state_from_user(user_data)
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0)
 
 
 @router.put("/game-state", response_model=GameStateResponse)
@@ -785,102 +866,42 @@ async def update_game_state(
 ):
     """
     Update the current user's game state (treasury, purchased_upgrades, readers, credibility).
-    Requires authentication.
+    Requires authentication. Uses PocketBase admin client to update users collection (user token often has no update permission).
     """
-    import httpx
     import json
     
-    pocketbase_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
     user_id = current_user.get("id")
-    
     if not user_id:
-        raise HTTPException(
-            status_code=401,
-            detail="User ID not found in token"
-        )
+        raise HTTPException(status_code=401, detail="User ID not found in token")
+    
+    update_payload = {}
+    if request.treasury is not None:
+        update_payload["treasury"] = request.treasury
+    if request.purchased_upgrades is not None:
+        update_payload["purchased_upgrades"] = json.dumps(request.purchased_upgrades)
+    if request.readers is not None:
+        update_payload["readers"] = request.readers
+    if request.credibility is not None:
+        update_payload["credibility"] = request.credibility
+    
+    if not update_payload:
+        # No fields to update: return current state (same as get_game_state)
+        return await get_game_state(current_user=current_user, headers=headers)
     
     try:
-        async with httpx.AsyncClient(base_url=pocketbase_url, timeout=30.0) as client:
-            # Get current user data first
-            get_response = await client.get(
-                f"/api/collections/users/records/{user_id}",
-                headers=headers,
-            )
-            
-            if get_response.status_code != 200:
-                raise HTTPException(
-                    status_code=get_response.status_code,
-                    detail="Failed to fetch current user data"
-                )
-            
-            user_data = get_response.json()
-            
-            # Prepare update payload (only update provided fields)
-            update_payload = {}
-            if request.treasury is not None:
-                update_payload["treasury"] = request.treasury
-            if request.purchased_upgrades is not None:
-                # Convert list to JSON string for PocketBase
-                update_payload["purchased_upgrades"] = json.dumps(request.purchased_upgrades)
-            if request.readers is not None:
-                update_payload["readers"] = request.readers
-            if request.credibility is not None:
-                update_payload["credibility"] = request.credibility
-            
-            if not update_payload:
-                # No fields to update, return current state
-                treasury = user_data.get("treasury", 0.0) or 0.0
-                purchased_upgrades = user_data.get("purchased_upgrades", []) or []
-                readers = user_data.get("readers", 0) or 0
-                credibility = user_data.get("credibility", 0.0) or 0.0
-                if isinstance(purchased_upgrades, str):
-                    try:
-                        purchased_upgrades = json.loads(purchased_upgrades)
-                    except:
-                        purchased_upgrades = []
-                return GameStateResponse(
-                    treasury=float(treasury),
-                    purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
-                    readers=int(readers),
-                    credibility=float(credibility)
-                )
-            
-            # Update user record
-            response = await client.patch(
-                f"/api/collections/users/records/{user_id}",
-                json=update_payload,
-                headers=headers,
-            )
-            
-            if response.status_code == 200:
-                updated_data = response.json()
-                treasury = updated_data.get("treasury", 0.0) or 0.0
-                purchased_upgrades = updated_data.get("purchased_upgrades", []) or []
-                readers = updated_data.get("readers", 0) or 0
-                credibility = updated_data.get("credibility", 0.0) or 0.0
-                
-                # Handle JSON string if needed
-                if isinstance(purchased_upgrades, str):
-                    try:
-                        purchased_upgrades = json.loads(purchased_upgrades)
-                    except:
-                        purchased_upgrades = []
-                
-                return GameStateResponse(
-                    treasury=float(treasury),
-                    purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
-                    readers=int(readers),
-                    credibility=float(credibility)
-                )
-            else:
-                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
-                error_message = error_data.get("message", response.text)
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Failed to update game state: {error_message}"
-                )
-                
+        pb = await _get_pb_admin_client()
+        updated = await pb.update_record("users", user_id, update_payload)
+        if updated:
+            return _parse_game_state_from_user(updated)
+        # update_record returned None (e.g. 404): try to return current state
+        user_data = await pb.get_record_by_id("users", user_id)
+        if user_data:
+            return _parse_game_state_from_user(user_data)
+        raise HTTPException(
+            status_code=404,
+            detail="Failed to update game state (user record not found)",
+        )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

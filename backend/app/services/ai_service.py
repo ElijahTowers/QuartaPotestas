@@ -901,7 +901,11 @@ Country Code:"""
                 models_list = models_response if isinstance(models_response, list) else []
             
             model_names = [m.get("name") if isinstance(m, dict) else str(m) for m in models_list]
-            return model in model_names
+            # Accept exact match or tag (e.g. "llama3" matches "llama3:latest")
+            if model in model_names:
+                return True
+            model_base = model.split(":")[0]
+            return any(n == model_base or n.startswith(model_base + ":") for n in model_names)
         except Exception as e:
             print(f"Error checking Ollama models: {e}")
             return False

@@ -69,6 +69,8 @@ app.include_router(achievements.router, prefix="/api")
 @app.on_event("startup")
 async def startup():
     print("✓ Using PocketBase as database backend")
+    from app.api import debug_pb
+    debug_pb.start_rss_poll_scheduler()
 
 
 @app.exception_handler(Exception)
