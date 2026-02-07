@@ -1975,7 +1975,11 @@ export default function EditorPage() {
       try {
         await checkAndUnlock("publish", {
           placed_items: placedItems,
-          stats: publishResult.stats,
+          stats: {
+            cash: publishStats.cash,
+            credibility: publishStats.credibility,
+            readers: publishStats.readers,
+          },
         });
       } catch (error) {
         console.error("Failed to check achievements:", error);

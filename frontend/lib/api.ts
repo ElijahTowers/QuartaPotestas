@@ -56,18 +56,14 @@ export function getActualApiUrl(path: string): string {
   return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-async function fetchWithErrorHandling(url: string): Promise<Response> {
+async function fetchWithErrorHandling(url: string, init?: RequestInit): Promise<Response> {
   try {
     const response = await fetch(url, {
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-      },
-      // Don't include credentials to avoid CORS preflight issues
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
       credentials: "omit",
-      // Add mode to handle CORS
       mode: "cors",
+      ...init,
     });
 
     return response;
@@ -474,23 +470,24 @@ export async function checkAchievements(
     throw new Error("Authentication required");
   }
 
-  const response = await fetchWithErrorHandling(
-    getActualApiUrl("/api/achievements/check"),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": `Bearer ${token}`,
-      },
-      credentials: "omit",
-      mode: "cors",
-      body: JSON.stringify({
-        event_type: eventType,
-        event_data: eventData,
-      }),
-    }
-  );
+  // Send event_type in URL (reliable) and full data in body
+  const baseUrl = getActualApiUrl("/api/achievements/check");
+  const url = `${baseUrl}${baseUrl.includes("?") ? "&" : "?"}event_type=${encodeURIComponent(eventType)}`;
+
+  const response = await fetchWithErrorHandling(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
+    credentials: "omit",
+    mode: "cors",
+    body: JSON.stringify({
+      event_type: eventType,
+      event_data: eventData,
+    }),
+  });
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => response.statusText);

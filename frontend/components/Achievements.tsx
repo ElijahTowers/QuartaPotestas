@@ -234,6 +234,19 @@ export default function Achievements({ isOpen, onClose }: AchievementsProps) {
                               >
                                 {achievement.description}
                               </p>
+                              {!isUnlocked && achievement.progress != null && achievement.progress > 0 && (
+                                <div className="mt-2">
+                                  <div className="h-1.5 bg-[#2a1810] rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-[#8b6f47] rounded-full transition-all"
+                                      style={{ width: `${Math.min(100, achievement.progress * 100)}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs text-[#8b6f47] mt-1 block">
+                                    {Math.round(achievement.progress * 100)}%
+                                  </span>
+                                </div>
+                              )}
                               <div className="flex items-center gap-2 mt-2">
                                 <span
                                   className={`text-xs px-2 py-0.5 rounded ${
