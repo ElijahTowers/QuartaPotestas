@@ -768,6 +768,8 @@ class GameStateResponse(BaseModel):
     purchased_upgrades: list[str]
     readers: int
     credibility: float
+    publish_streak: int = 0
+    last_publish_date: Optional[str] = None
 
 
 class GameStateUpdateRequest(BaseModel):
@@ -784,6 +786,8 @@ def _parse_game_state_from_user(user_data: dict) -> "GameStateResponse":
     purchased_upgrades = user_data.get("purchased_upgrades", []) or []
     readers = user_data.get("readers", 0) or 0
     credibility = user_data.get("credibility", 0.0) or 0.0
+    publish_streak = int(user_data.get("publish_streak", 0) or 0)
+    last_publish_date = user_data.get("last_publish_date") or None
     if isinstance(purchased_upgrades, str):
         try:
             purchased_upgrades = json.loads(purchased_upgrades)
@@ -794,6 +798,8 @@ def _parse_game_state_from_user(user_data: dict) -> "GameStateResponse":
         purchased_upgrades=purchased_upgrades if isinstance(purchased_upgrades, list) else [],
         readers=int(readers),
         credibility=float(credibility),
+        publish_streak=publish_streak,
+        last_publish_date=last_publish_date,
     )
 
 
@@ -855,7 +861,7 @@ async def get_game_state(
         raise
     except Exception:
         pass
-    return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0)
+    return GameStateResponse(treasury=0.0, purchased_upgrades=[], readers=0, credibility=0.0, publish_streak=0, last_publish_date=None)
 
 
 @router.put("/game-state", response_model=GameStateResponse)
@@ -897,6 +903,9 @@ async def update_game_state(
         user_data = await pb.get_record_by_id("users", user_id)
         if user_data:
             return _parse_game_state_from_user(user_data)
+        # Debug: backend can't find user in PocketBase - usually wrong POCKETBASE_URL
+        pb_url = os.getenv("POCKETBASE_URL", "http://127.0.0.1:8090")
+        print(f"[game-state] 404: user_id={user_id} not found. POCKETBASE_URL={pb_url} (must match frontend PocketBase)")
         raise HTTPException(
             status_code=404,
             detail="Failed to update game state (user record not found)",

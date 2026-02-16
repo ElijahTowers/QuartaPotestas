@@ -5,7 +5,7 @@ Handles saving and retrieving user-published newspaper editions
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import sys
 import json
@@ -179,30 +179,46 @@ async def publish_edition(
         # Create record in PocketBase
         published_edition = await pb_client.create_record("published_editions", edition_data)
         
-        # Update user's game state (readers, credibility, and treasury) from published edition stats
+        # Update user's game state (readers, credibility, treasury, daily streak) from published edition stats
         if published_edition:
             try:
-                # Get current user record to get existing treasury
                 user_record = await pb_client.get_record_by_id("users", user_id)
                 current_treasury = 0.0
                 if user_record:
                     current_treasury = float(user_record.get("treasury", 0.0) or 0.0)
-                
-                # Treasury is cumulative: add cash from this edition to existing treasury
                 new_treasury = current_treasury + request.stats.cash
-                
-                # Update user record with latest stats
+
+                # Daily streak: consecutive days the user has published; resets if a day is skipped
+                today_str = now.date().isoformat()
+                last_date = (user_record or {}).get("last_publish_date") or ""
+                current_streak = int((user_record or {}).get("publish_streak", 0) or 0)
+                if not last_date:
+                    new_streak = 1
+                elif last_date == today_str:
+                    new_streak = current_streak  # same day, no change
+                else:
+                    try:
+                        last_d = datetime.fromisoformat(last_date).date()
+                        yesterday = (now.date() - timedelta(days=1))
+                        if last_d == yesterday:
+                            new_streak = current_streak + 1
+                        else:
+                            new_streak = 1  # gap or in past: reset
+                    except Exception:
+                        new_streak = 1
+
                 await pb_client.update_record(
                     "users",
                     user_id,
                     {
                         "readers": request.stats.readers,
                         "credibility": request.stats.credibility,
-                        "treasury": new_treasury,  # Cumulative treasury
+                        "treasury": new_treasury,
+                        "last_publish_date": today_str,
+                        "publish_streak": new_streak,
                     }
                 )
             except Exception as e:
-                # Log error but don't fail the publish
                 print(f"Warning: Failed to update user game state: {e}")
         
         if not published_edition:

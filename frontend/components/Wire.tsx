@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import type { Article } from "@/types/api";
 import { Newspaper, MapPin, Tag, Clock, GripVertical, Search, X } from "lucide-react";
-import { parseDutchDateTime, formatDutchTime } from "@/lib/dateUtils";
+import { parseDutchDateTime, formatDutchTime, formatDutchDate } from "@/lib/dateUtils";
 
 interface WireProps {
   articles: Article[];
@@ -54,6 +54,10 @@ function DraggableArticleItem({
   // Determine cursor style and drag behavior based on view mode
   const isMapMode = viewMode === "map";
   const cursorClass = isMapMode ? "cursor-pointer" : "cursor-grab";
+  const parsedDate = parseDutchDateTime(article.published_at);
+  const dateDisplay = parsedDate
+    ? `${formatDutchDate(parsedDate)} · ${formatDutchTime(parsedDate)}`
+    : (article.date || "--");
 
   return (
     <div
@@ -84,9 +88,7 @@ function DraggableArticleItem({
       <div className="flex items-center gap-2 mb-2 flex-wrap">
         <div className="flex items-center gap-1 text-xs text-[#8b6f47]">
           <Clock className="w-3 h-3" />
-          <span>
-            {formatDutchTime(parseDutchDateTime(article.published_at))}
-          </span>
+          <span>{dateDisplay}</span>
         </div>
         {article.location_city && (
           <div className="flex items-center gap-1 text-xs text-[#8b6f47]">

@@ -14,14 +14,14 @@ import UsernameEditor from "@/components/UsernameEditor";
 import NewspaperNameEditor from "@/components/NewspaperNameEditor";
 import { motion } from "framer-motion";
 import { useTutorial } from "@/context/TutorialContext";
-import { BookOpen, Trophy } from "lucide-react";
+import { BookOpen, Trophy, Flame } from "lucide-react";
 import MorningReport from "@/components/MorningReport";
 import NewspaperAnimation from "@/components/NewspaperAnimation";
 import Achievements from "@/components/Achievements";
 
 export default function HubPage() {
   const router = useRouter();
-  const { treasury, newspaperName, setNewspaperName, readers, credibility, refreshGameState } = useGame();
+  const { treasury, newspaperName, setNewspaperName, readers, credibility, publishStreak, refreshGameState } = useGame();
   const { user } = useAuth();
   const { startTutorial, hasCompleted } = useTutorial();
   
@@ -298,11 +298,22 @@ export default function HubPage() {
                 </h2>
                 
                 {/* Current Funds */}
-                <div className="mb-6">
+                <div className="mb-4">
                   <p className="text-sm text-[#8b6f47] mb-1">Current Funds</p>
                   <p className={`text-4xl font-bold ${treasury >= 0 ? "text-green-700" : "text-red-700"}`}>
                     ${treasury.toLocaleString()}
                   </p>
+                </div>
+
+                {/* Daily streak */}
+                <div className="mb-6 flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-orange-600" aria-hidden />
+                  <div>
+                    <p className="text-sm text-[#8b6f47]">Daily streak</p>
+                    <p className="text-xl font-bold text-[#1a0f08]">
+                      {publishStreak} {publishStreak === 1 ? "day" : "days"}
+                    </p>
+                  </div>
                 </div>
 
                 {/* Recent Activity */}

@@ -14,6 +14,52 @@ class PocketBaseClient:
         self.client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
         self.admin_token: Optional[str] = None
 
+    async def _get_user_by_email(self, email: str, password: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Fetch a user record by email (for get-or-create when create fails with unique)."""
+        try:
+            email_clean = email.strip()
+            # 1. Try list with filter (admin token)
+            if self.admin_token:
+                headers = {"Authorization": f"Bearer {self.admin_token}"}
+                for filter_val in [f'email = "{email_clean}"', f"email = '{email_clean}'"]:
+                    r = await self.client.get(
+                        "/api/collections/users/records",
+                        params={"filter": filter_val, "perPage": 1},
+                        headers=headers,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        items = (data.get("items") or []) if isinstance(data, dict) else []
+                        if items and (str(items[0].get("email") or "")).strip() == email_clean:
+                            return items[0]
+                # 2. Fallback: list all and filter
+                r = await self.client.get(
+                    "/api/collections/users/records",
+                    params={"perPage": 500},
+                    headers=headers,
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    items = (data.get("items") or []) if isinstance(data, dict) else []
+                    for u in items:
+                        if (str(u.get("email") or "").strip() == email_clean):
+                            return u
+            # 3. Fallback: auth-with-password (works when list is forbidden - returns user record)
+            if password:
+                auth_r = await self.client.post(
+                    "/api/collections/users/auth-with-password",
+                    json={"identity": email_clean, "password": password},
+                )
+                if auth_r.status_code == 200:
+                    data = auth_r.json()
+                    user = data.get("record") or data.get("user") or data
+                    if user and user.get("email"):
+                        return user if isinstance(user, dict) else None
+            return None
+        except Exception as e:
+            print(f"DEBUG _get_user_by_email: {e}")
+            return None
+
     async def authenticate_admin(self, email: str, password: str) -> bool:
         """Authenticate as admin/superuser"""
         try:
@@ -64,22 +110,21 @@ class PocketBaseClient:
                 return response.json()
             else:
                 error_text = response.text
+                # User already exists (email unique) - fetch and return existing record
+                if (
+                    collection == "users"
+                    and response.status_code == 400
+                    and ("validation_not_unique" in error_text or "Value must be unique" in error_text)
+                ):
+                    email = data.get("email")
+                    password = data.get("password")
+                    if email:
+                        existing = await self._get_user_by_email(email, password=password)
+                        if existing:
+                            print(f"INFO: User {email} already exists, returning existing record")
+                            return existing
                 error_msg = f"Failed to create record in {collection}: {response.status_code} - {error_text}"
                 print(f"ERROR: {error_msg}")
-                # For users collection, try using the admin API endpoint
-                if collection == "users" and response.status_code != 200:
-                    print(f"INFO: Attempting to create user via admin API...")
-                    # Try admin API endpoint for user creation
-                    admin_response = await self.client.post(
-                        f"/api/collections/users/records",
-                        json=data,
-                        headers=headers,
-                    )
-                    if admin_response.status_code == 200:
-                        return admin_response.json()
-                    else:
-                        error_msg = f"Failed to create user via admin API: {admin_response.status_code} - {admin_response.text}"
-                        print(f"ERROR: {error_msg}")
                 raise Exception(error_msg)
         except Exception as e:
             # Re-raise if it's already our custom exception

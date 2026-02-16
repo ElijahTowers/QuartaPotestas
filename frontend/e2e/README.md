@@ -61,6 +61,16 @@ Tests worden automatisch uitgevoerd bij:
 
 Zie `.github/workflows/playwright.yml` voor de configuratie.
 
+## Optionele login voor E2E
+
+Voor tests die ingelogde flows nodig hebben (bijv. tutorial met editor):
+
+```bash
+E2E_TEST_EMAIL=your@email.com E2E_TEST_PASSWORD=yourpassword npm run test:e2e
+```
+
+Zonder deze variabelen draaien de tests in guest mode waar mogelijk.
+
 ## Tips
 
 - Gebruik `page.waitForLoadState('networkidle')` om te wachten tot de pagina volledig geladen is

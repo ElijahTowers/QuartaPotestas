@@ -15,6 +15,7 @@ import {
   Loader2,
   X,
   Activity,
+  Bug,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useTutorial } from "@/context/TutorialContext";
@@ -47,6 +48,7 @@ export default function MobileDrawer({
   const isArchivesActive = pathname === "/archives";
   const isLeaderboardActive = pathname === "/leaderboard";
   const isMonitorActive = pathname === "/monitor";
+  const isDebugActive = pathname === "/debug";
   const isAdmin = user?.email === ADMIN_EMAIL;
 
   const handleLogout = async () => {
@@ -125,6 +127,14 @@ export default function MobileDrawer({
             path: "/monitor",
             active: isMonitorActive,
             onClick: () => handleNavigation("/monitor"),
+          },
+          {
+            id: "debug",
+            label: "Debug",
+            icon: Bug,
+            path: "/debug",
+            active: isDebugActive,
+            onClick: () => handleNavigation("/debug"),
           },
         ]
       : []),

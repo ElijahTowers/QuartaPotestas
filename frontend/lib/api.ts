@@ -637,6 +637,16 @@ export async function fetchLatestArticles(): Promise<import("@/types/api").Daily
       return mappedData;
     } else {
       const errorText = await response.text().catch(() => response.statusText);
+      // 404 "No daily edition" is expected when DB is empty (ingestion not run yet)
+      if (response.status === 404 && errorText.includes("No daily edition")) {
+        console.log("[fetchLatestArticles] No daily edition yet, returning empty");
+        return {
+          id: 0,
+          date: new Date().toISOString().split("T")[0],
+          global_mood: "neutral",
+          articles: [],
+        };
+      }
       console.error(`[fetchLatestArticles] Public endpoint returned ${response.status}:`, errorText);
       throw new Error(`Public endpoint returned ${response.status}: ${errorText}`);
     }
@@ -1411,11 +1421,25 @@ export async function updateNewspaperName(newspaperName: string): Promise<void> 
 }
 
 /**
- * Get the current user's game state (treasury, purchased_upgrades, readers, credibility) from the database
+ * Get the current user's game state (treasury, purchased_upgrades, readers, credibility, publish_streak) from the database
  */
-export async function getGameState(): Promise<{ treasury: number; purchased_upgrades: string[]; readers: number; credibility: number }> {
+export async function getGameState(): Promise<{
+  treasury: number;
+  purchased_upgrades: string[];
+  readers: number;
+  credibility: number;
+  publish_streak: number;
+  last_publish_date: string | null;
+}> {
+  const defaults = {
+    treasury: 0,
+    purchased_upgrades: [] as string[],
+    readers: 0,
+    credibility: 0,
+    publish_streak: 0,
+    last_publish_date: null as string | null,
+  };
   try {
-    // Get token from PocketBase auth store
     const { getPocketBase } = await import("@/lib/pocketbase");
     const pb = getPocketBase();
     const token = pb.authStore.token;
@@ -1435,21 +1459,21 @@ export async function getGameState(): Promise<{ treasury: number; purchased_upgr
     });
 
     if (!response.ok) {
-      // If error, return defaults
-      return { treasury: 0, purchased_upgrades: [], readers: 0, credibility: 0 };
+      return defaults;
     }
 
     const data = await response.json();
     return {
-      treasury: data.treasury || 0,
-      purchased_upgrades: data.purchased_upgrades || [],
-      readers: data.readers || 0,
-      credibility: data.credibility || 0,
+      treasury: data.treasury ?? 0,
+      purchased_upgrades: data.purchased_upgrades ?? [],
+      readers: data.readers ?? 0,
+      credibility: data.credibility ?? 0,
+      publish_streak: data.publish_streak ?? 0,
+      last_publish_date: data.last_publish_date ?? null,
     };
   } catch (error) {
     console.error("Failed to fetch game state:", error);
-    // Return defaults on error
-    return { treasury: 0, purchased_upgrades: [], readers: 0, credibility: 0 };
+    return defaults;
   }
 }
 
@@ -1480,9 +1504,20 @@ export async function updateGameState(updates: { treasury?: number; purchased_up
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
+      if (response.status === 404 && errorText.includes("user record not found")) {
+        // Backend kan user record niet vinden (configuratie/setup issue).
+        // Niet uitloggen – gebruiker blijft ingelogd, game state wordt niet opgeslagen.
+        console.warn("[updateGameState] User record niet gevonden (404) – game state wordt niet opgeslagen. Controleer PocketBase users-collectie.");
+        return;
+      }
       throw new Error(`Failed to update game state (${response.status}): ${errorText}`);
     }
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("404") && msg.includes("user record not found")) {
+      console.warn("[updateGameState] User record niet gevonden – game state wordt niet opgeslagen.");
+      return;
+    }
     console.error("Failed to update game state:", error);
     throw error;
   }

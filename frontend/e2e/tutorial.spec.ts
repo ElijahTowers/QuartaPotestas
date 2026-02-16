@@ -1,5 +1,37 @@
 import { test, expect } from '@playwright/test';
 
+/** Test credentials (optional). Set E2E_TEST_EMAIL and E2E_TEST_PASSWORD to run authenticated flows. */
+const TEST_EMAIL = process.env.E2E_TEST_EMAIL || '';
+const TEST_PASSWORD = process.env.E2E_TEST_PASSWORD || '';
+
+/** Log in via the login page when credentials are set. Returns true if login was attempted and succeeded. */
+async function loginIfNeeded(page: import('@playwright/test').Page): Promise<boolean> {
+  if (!TEST_EMAIL || !TEST_PASSWORD) return false;
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  await page.getByLabel(/email address/i).fill(TEST_EMAIL);
+  await page.getByLabel(/^password$/i).fill(TEST_PASSWORD);
+  await page.getByRole('button', { name: /access the war room/i }).click();
+  await page.waitForURL((url) => url.pathname !== '/login', { timeout: 10000 }).catch(() => {});
+  return page.url().includes('/login') === false;
+}
+
+/** Start tutorial from hub (click Start Tutorial) and optionally go to editor. */
+async function startTutorialFromHub(page: import('@playwright/test').Page, thenGoToEditor = false) {
+  await page.goto('/hub');
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(500);
+  const startBtn = page.getByRole('button', { name: /start tutorial|restart tutorial/i });
+  if (await startBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await startBtn.click();
+    await page.waitForTimeout(500);
+  }
+  if (thenGoToEditor) {
+    await page.goto('/editor');
+    await page.waitForLoadState('networkidle');
+  }
+}
+
 /**
  * Test suite voor de tutorial functionaliteit
  * Deze tests controleren of alle tutorial stappen correct werken
@@ -150,32 +182,41 @@ test.describe('Tutorial Flow', () => {
   });
 
   test('should wait for variant-selector element in step 6', async ({ page }) => {
-    // Login eerst (als nodig)
-    // TODO: Voeg login logica toe als nodig
-
-    // Navigeer naar editor
-    await page.goto('/editor');
-    await page.waitForLoadState('networkidle');
-
-    // Start tutorial (als deze niet automatisch start)
-    // TODO: Voeg logica toe om tutorial te starten vanaf editor pagina
-
-    // Simuleer dat er een artikel in een slot staat
-    // TODO: Voeg logica toe om een artikel te plaatsen
-
-    // Wacht tot variant-selector element verschijnt
-    const variantSelector = page.locator('[data-tutorial="variant-selector"]').first();
-    
-    // De tutorial zou moeten wachten tot dit element verschijnt (max 20 seconden)
-    // Controleer of tutorial niet direct sluit
-    const tutorialTooltip = page.locator('text=/Choose how to spin/i');
-    
-    // Als variant-selector niet direct bestaat, zou tutorial moeten wachten
-    // Dit test of de "waiting" functionaliteit werkt
-    if (!(await variantSelector.isVisible({ timeout: 1000 }))) {
-      // Tutorial zou nog steeds actief moeten zijn
-      await expect(tutorialTooltip.or(page.locator('text=/Step 6/i'))).toBeVisible({ timeout: 5000 });
+    // Login als test credentials gezet zijn (anders guest mode)
+    if (TEST_EMAIL && TEST_PASSWORD) {
+      await loginIfNeeded(page);
     }
+
+    // Start tutorial vanaf hub en ga naar editor
+    await startTutorialFromHub(page, true);
+    await page.waitForTimeout(1000);
+
+    // Stap door tutorial tot stap 6 (variant selector): stap 1 map, 2 wire, 3 grid-tab, 4 editor, 5 place, 6 variant
+    const nextBtn = page.getByRole('button', { name: /next/i }).first();
+    for (let i = 0; i < 5; i++) {
+      if (await nextBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await nextBtn.click();
+        await page.waitForTimeout(400);
+      }
+    }
+
+    // Probeer een artikel in een slot te plaatsen: sleep artikel van wire naar grid (dnd-kit)
+    const wire = page.locator('[data-tutorial="editor-wire"]');
+    const dropZone = page.locator('[data-tutorial="grid-layout"]').locator('[data-slot], .min-h-\\[80px\\], [class*="droppable"]').first();
+    if (await wire.isVisible({ timeout: 3000 }).catch(() => false) && await dropZone.isVisible({ timeout: 2000 }).catch(() => false)) {
+      const firstArticle = wire.locator('[data-draggable], [draggable], [class*="draggable"]').first();
+      if (await firstArticle.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await firstArticle.dragTo(dropZone, { force: true }).catch(() => {});
+        await page.waitForTimeout(500);
+      }
+    }
+
+    // Wacht tot variant-selector zichtbaar is of tutorial tooltip (Step 6 / Choose how to spin)
+    const variantSelector = page.locator('[data-tutorial="variant-selector"]').first();
+    const tutorialTooltip = page.locator('text=/Choose how to spin/i').or(page.locator('text=/Step 6/i'));
+    const selectorVisible = await variantSelector.isVisible({ timeout: 3000 }).catch(() => false);
+    const tooltipVisible = await tutorialTooltip.first().isVisible({ timeout: 3000 }).catch(() => false);
+    expect(selectorVisible || tooltipVisible).toBeTruthy();
   });
 });
 

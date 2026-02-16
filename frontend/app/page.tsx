@@ -19,6 +19,7 @@ import Wire from "@/components/Wire";
 import GameLayout from "@/components/GameLayout";
 import Assistant from "@/components/Assistant";
 import { Loader2, AlertCircle, Search, X } from "lucide-react";
+import { parseDutchDateTime, formatDutchDate, formatDutchTime } from "@/lib/dateUtils";
 import ShopModal from "@/components/ShopModal";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useAuth } from "@/context/AuthContext";
@@ -478,7 +479,12 @@ export default function Home() {
                         </div>
                       ) : (
                         <div className="flex gap-4 px-4 py-4 h-full" style={{ scrollSnapType: "x mandatory" }}>
-                          {availableArticles.map((article) => (
+                          {availableArticles.map((article) => {
+                            const parsed = parseDutchDateTime(article.published_at);
+                            const dateDisplay = parsed
+                              ? `${formatDutchDate(parsed)} · ${formatDutchTime(parsed)}`
+                              : (article.date || "--");
+                            return (
                           <div
                             key={article.id}
                             onClick={() => handleArticleSelect(article.id)}
@@ -492,6 +498,7 @@ export default function Home() {
                             <h3 className="text-base font-bold text-[#e8dcc6] font-serif mb-2 line-clamp-2">
                               {article.original_title}
                             </h3>
+                            <p className="text-xs text-[#8b6f47] mb-1">{dateDisplay}</p>
                             {article.location_city && (
                               <p className="text-xs text-[#8b6f47] mb-1">
                                 📍 {article.location_city}
@@ -503,7 +510,8 @@ export default function Home() {
                               </p>
                             )}
                           </div>
-                        ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>

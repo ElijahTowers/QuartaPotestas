@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Assistant from "./Assistant";
 import EditableTitle from "./EditableTitle";
-import { Loader2, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, LogOut, BookOpen, Trophy, Menu, Activity } from "lucide-react";
+import { Loader2, Map as MapIcon, LayoutGrid, RefreshCw, ShoppingBag, Briefcase, LogOut, BookOpen, Trophy, Menu, Activity, Bug } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useAuth } from "@/context/AuthContext";
 import { useTutorial } from "@/context/TutorialContext";
@@ -63,6 +63,7 @@ export default function GameLayout({
   const isArchivesActive = pathname === "/archives";
   const isLeaderboardActive = pathname === "/leaderboard";
   const isMonitorActive = pathname === "/monitor";
+  const isDebugActive = pathname === "/debug";
   
   // Check if current user is admin
   const isAdmin = user?.email === ADMIN_EMAIL;
@@ -261,18 +262,32 @@ export default function GameLayout({
             <span className="text-[10px]">Top 5</span>
           </button>
           {isAdmin && (
-            <button
-              onClick={() => router.push("/monitor")}
-              className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
-                isMonitorActive
-                  ? "bg-[#d4af37] text-[#1a0f08]"
-                  : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
-              }`}
-              title="System monitor"
-            >
-              <Activity className="w-5 h-5" />
-              <span className="text-[10px]">Monitor</span>
-            </button>
+            <>
+              <button
+                onClick={() => router.push("/monitor")}
+                className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+                  isMonitorActive
+                    ? "bg-[#d4af37] text-[#1a0f08]"
+                    : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+                }`}
+                title="System monitor"
+              >
+                <Activity className="w-5 h-5" />
+                <span className="text-[10px]">Monitor</span>
+              </button>
+              <button
+                onClick={() => router.push("/debug")}
+                className={`w-12 h-12 rounded transition-colors flex flex-col items-center justify-center gap-1 ${
+                  isDebugActive
+                    ? "bg-[#d4af37] text-[#1a0f08]"
+                    : "bg-[#3a2418] text-[#8b6f47] hover:bg-[#4a3020]"
+                }`}
+                title="Debug: BBC RSS feed"
+              >
+                <Bug className="w-5 h-5" />
+                <span className="text-[10px]">Debug</span>
+              </button>
+            </>
           )}
           {!isGuest && (
             <button

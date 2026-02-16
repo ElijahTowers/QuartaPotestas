@@ -11,7 +11,9 @@ import time
 # Add parent directory to path to import lib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+import asyncio
 from lib.pocketbase_client import PocketBaseClient, serialize_for_pb
+from lib.article_extractor import extract_full_text
 from app.services.rss_service import RSSService
 from app.services.ai_service import AIService
 from app.services.geo_service import GeoService
@@ -20,8 +22,10 @@ from app.services.geo_service import GeoService
 class IngestionServicePB:
     """Service that orchestrates the daily ingestion of articles into PocketBase."""
     
-    # Test mode: limits articles to 5 for quick testing
+    # Test mode: limits articles per run for quick testing (set TEST_MODE=false to process all)
     TEST_MODE = os.getenv("TEST_MODE", "true").lower() == "true"
+    # Max articles to process per run when TEST_MODE is true (set INGEST_MAX_ARTICLES=0 for no limit)
+    MAX_ARTICLES_PER_RUN = int(os.getenv("INGEST_MAX_ARTICLES", "5") or "5")
     
     def __init__(self, pb_client: PocketBaseClient):
         self.pb = pb_client
@@ -29,8 +33,8 @@ class IngestionServicePB:
         self.ai_service = AIService()
         self.geo_service = GeoService()
         
-        if IngestionServicePB.TEST_MODE:
-            print("[IngestionServicePB] TEST MODE ENABLED - Only processing 5 articles")
+        if IngestionServicePB.TEST_MODE and IngestionServicePB.MAX_ARTICLES_PER_RUN > 0:
+            print(f"[IngestionServicePB] TEST MODE - Processing up to {IngestionServicePB.MAX_ARTICLES_PER_RUN} articles per run")
     
     async def _get_or_create_system_user(self) -> str:
         """Get or create a system user for ingestion."""
@@ -65,6 +69,16 @@ class IngestionServicePB:
                 system_user = await self.pb.create_record("users", system_user_data)
             except Exception as create_error:
                 error_details = str(create_error)
+                # User may already exist (email unique) - refetch
+                if "validation_not_unique" in error_details or "Value must be unique" in error_details or "unique" in error_details.lower():
+                    print(f"[IngestionServicePB] User exists (email unique), fetching existing user...")
+                    for use_filter in [True, False]:
+                        users = await self.pb.get_list("users", per_page=500, filter='email = "system@ingestion.local"' if use_filter else None)
+                        found = [u for u in (users or []) if (u.get("email") or "") == "system@ingestion.local"]
+                        if found:
+                            user_id = found[0]["id"]
+                            print(f"[IngestionServicePB] Using existing system user: {user_id}")
+                            return user_id
                 print(f"[IngestionServicePB] create_record raised exception: {error_details}")
                 raise Exception(f"Failed to create system user: {error_details}")
             
@@ -158,10 +172,10 @@ class IngestionServicePB:
                 raise Exception("Failed to create daily edition in PocketBase")
             daily_edition_id = daily_edition["id"]
         
-        # Fetch articles from RSS feeds
+        # Fetch articles from RSS: pubDate gisteren 18:00 NL t/m nu; daarna vergelijken met PB
         self._step(on_step, "RSS-feeds ophalen…")
         try:
-            raw_articles = self.rss_service.fetch_all_feeds()
+            raw_articles = self.rss_service.fetch_all_feeds()  # window: yesterday 18:00 Dutch → now
             if not raw_articles:
                 raise Exception("No articles fetched from RSS feeds")
         except Exception as e:
@@ -193,16 +207,17 @@ class IngestionServicePB:
                 "skipped_already_in_pb": skipped_existing,
             }
         
-        # Process only new articles
-        processed_count = 0
-        articles_to_process = new_raw_articles[:5] if IngestionServicePB.TEST_MODE else new_raw_articles
+        # Process only new articles (optionally limited per run when TEST_MODE + INGEST_MAX_ARTICLES)
+        limit = IngestionServicePB.MAX_ARTICLES_PER_RUN if (IngestionServicePB.TEST_MODE and IngestionServicePB.MAX_ARTICLES_PER_RUN > 0) else None
+        articles_to_process = new_raw_articles[:limit] if limit else new_raw_articles
         total_to_process = len(articles_to_process)
-        if IngestionServicePB.TEST_MODE and len(new_raw_articles) > 5:
-            print(f"[IngestionServicePB] TEST MODE: Processing only 5 of {len(new_raw_articles)} new articles")
+        if limit and len(new_raw_articles) > limit:
+            print(f"[IngestionServicePB] Processing {limit} of {len(new_raw_articles)} new articles (set INGEST_MAX_ARTICLES=0 or TEST_MODE=false for all)")
         self._step(on_step, f"{total_to_process} nieuwe artikelen om te verwerken.")
 
         # Track timing for each scoop
         scoop_timings: List[Dict[str, Any]] = []
+        processed_count = 0
 
         for idx, raw_article in enumerate(articles_to_process, start=1):
             scoop_start_time = time.time()
@@ -212,18 +227,37 @@ class IngestionServicePB:
             try:
                 step_timings = {}
                 
-                # Simplify the original article text using AI
                 original_title = raw_article.get("title", "")
-                original_content = raw_article.get("summary", raw_article.get("description", ""))
+                rss_summary = raw_article.get("summary", raw_article.get("description", ""))
+                article_url = raw_article.get("link", "")
                 
-                # Simplify title and content
+                # Try to fetch full article text first (runs in thread to avoid blocking)
+                step_start = time.time()
+                full_text = await asyncio.to_thread(extract_full_text, article_url) if article_url else None
+                step_timings["extract_full_text"] = round(time.time() - step_start, 2)
+                
+                # Use full text if available, else fall back to RSS summary
+                raw_content = full_text if full_text else rss_summary
+                if full_text:
+                    self._step(on_step, "  (full article text used)")
+                    # Truncate to first ~500 words: main article is usually at top, sidebar/related later
+                    words = raw_content.split()
+                    if len(words) > 500:
+                        raw_content = " ".join(words[:500]) + "…"
+                
+                # Simplify title (always)
                 step_start = time.time()
                 simplified_title = self.ai_service.simplify_english(original_title, max_words=10)
                 step_timings["simplify_title"] = round(time.time() - step_start, 2)
                 
+                # Simplify content only when short (RSS summary); long full text goes direct to AI
                 step_start = time.time()
-                simplified_content = self.ai_service.simplify_english(original_content)
-                step_timings["simplify_content"] = round(time.time() - step_start, 2)
+                if raw_content and len(raw_content.split()) <= 150:
+                    simplified_content = self.ai_service.simplify_english(raw_content)
+                    step_timings["simplify_content"] = round(time.time() - step_start, 2)
+                else:
+                    simplified_content = raw_content or rss_summary
+                    step_timings["simplify_content"] = 0
                 
                 title = simplified_title
                 content = simplified_content
@@ -242,7 +276,14 @@ class IngestionServicePB:
                         published_at = datetime.now()
                 
                 step_start = time.time()
-                ai_result = self.ai_service.generate_article_variants(title, content)
+                # When using full article text, anchor the AI to RSS title + summary to prevent drift
+                rss_title_anchor = original_title if full_text else None
+                rss_summary_anchor = rss_summary if full_text else None
+                ai_result = self.ai_service.generate_article_variants(
+                    title, content,
+                    rss_title_anchor=rss_title_anchor,
+                    rss_summary_anchor=rss_summary_anchor
+                )
                 step_timings["generate_variants"] = round(time.time() - step_start, 2)
                 
                 # Get coordinates
@@ -312,33 +353,11 @@ class IngestionServicePB:
                     "doomers": 0,
                 })
                 
-                # Check if article with same original_title already exists
-                # Use the simplified title (which is stored as original_title) for duplicate checking
-                # Escape quotes in title for PocketBase filter
-                title_escaped = title.replace('"', '\\"').replace("'", "\\'")
-                step_start = time.time()
-                existing_articles = await self.pb.get_list(
-                    "articles",
-                    filter=f'original_title = "{title_escaped}"',
-                )
-                step_timings["check_duplicate"] = round(time.time() - step_start, 2)
-                
-                if existing_articles and len(existing_articles) > 0:
-                    self._step(on_step, f"Artikel {idx}/{total_to_process} overgeslagen (dubbel).")
-                    existing_id = existing_articles[0]["id"]
-                    existing_date = existing_articles[0].get("date", "unknown")
-                    print(f"[IngestionServicePB] ⚠️  Skipping duplicate article: '{title[:50]}...' (already exists: {existing_id}, date: {existing_date})")
-                    scoop_timings.append({
-                        "scoop_index": idx,
-                        "title": scoop_title,
-                        "duration_seconds": round(time.time() - scoop_start_time, 2),
-                        "status": "skipped_duplicate",
-                        "existing_id": existing_id,
-                        "existing_date": existing_date,
-                        "step_timings": step_timings
-                    })
-                    continue  # Skip this article
-                
+                # Uniqueness is by source_url only (already filtered at start).
+                # We do NOT skip by original_title: different articles (different URLs) can have
+                # similar simplified titles (e.g. two "Savannah" stories) and should both be stored.
+                step_timings["check_duplicate"] = 0
+
                 # Create article in PocketBase (include source_url for incremental RSS runs)
                 article_data = serialize_for_pb({
                     "daily_edition_id": daily_edition_id,

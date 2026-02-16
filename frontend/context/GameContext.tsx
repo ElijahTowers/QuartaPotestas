@@ -23,23 +23,27 @@ interface GameContextType {
   buyUpgrade: (cost: number, upgradeId: string) => boolean;
   readers: number;
   credibility: number;
+  publishStreak: number;
+  lastPublishDate: string | null;
   refreshGameState: () => Promise<void>;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export function GameProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isGuest } = useAuth();
   const [newspaperName, setNewspaperNameState] = useState<string>("THE DAILY DYSTOPIA");
   const [treasury, setTreasuryState] = useState<number>(0);
   const [purchasedUpgrades, setPurchasedUpgradesState] = useState<string[]>([]);
   const [readers, setReadersState] = useState<number>(0);
   const [credibility, setCredibilityState] = useState<number>(0);
+  const [publishStreak, setPublishStreakState] = useState<number>(0);
+  const [lastPublishDate, setLastPublishDateState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   
-  // Load newspaper name and game state from database when user is authenticated
+  // Load newspaper name and game state from database when user is authenticated (not guest)
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isGuest) {
       setIsLoading(true);
       
       // Load newspaper name
@@ -58,6 +62,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
           setPurchasedUpgradesState(state.purchased_upgrades);
           setReadersState(state.readers);
           setCredibilityState(state.credibility);
+          setPublishStreakState(state.publish_streak ?? 0);
+          setLastPublishDateState(state.last_publish_date ?? null);
           setIsLoading(false);
         })
         .catch((error) => {
@@ -67,13 +73,21 @@ export function GameProvider({ children }: { children: ReactNode }) {
     } else {
       setIsLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isGuest]);
+
+  const handleGameStateError = useCallback((error: unknown) => {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes("404") || msg.includes("user record not found")) {
+      // Backend kan user record niet vinden – waarschijnlijk setup/veld-configuratie. Niet uitloggen.
+      console.warn("[GameContext] Game state kon niet opgeslagen worden (user record niet gevonden). Controleer PocketBase users-collectie.");
+    }
+  }, []);
   
   // Wrapper function to save to database when newspaper name changes
   // Re-throws errors so components can handle them (e.g., show validation errors)
   const setNewspaperName = useCallback(async (name: string) => {
-    // Save to database if authenticated
-    if (isAuthenticated) {
+    // Save to database if authenticated (not guest)
+    if (isAuthenticated && !isGuest) {
       try {
         await updateNewspaperName(name);
         // Only update local state if save succeeded
@@ -87,33 +101,34 @@ export function GameProvider({ children }: { children: ReactNode }) {
       // Not authenticated, just update local state
       setNewspaperNameState(name);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isGuest]);
   
   // Wrapper function to save treasury to database when it changes
   const setTreasury = useCallback(async (amount: number | ((prev: number) => number)) => {
     const newAmount = typeof amount === "function" ? amount(treasury) : amount;
     setTreasuryState(newAmount);
     
-    // Save to database if authenticated
-    if (isAuthenticated && !isLoading) {
+    // Save to database if authenticated (not guest)
+    if (isAuthenticated && !isGuest && !isLoading) {
       try {
         await updateGameState({ treasury: newAmount });
       } catch (error) {
         console.error("Failed to save treasury:", error);
-        // Continue even if save fails - user can try again
+        handleGameStateError(error);
       }
     }
-  }, [isAuthenticated, treasury, isLoading]);
+  }, [isAuthenticated, isGuest, treasury, isLoading, handleGameStateError]);
   
   // Save purchased upgrades to database when they change
   useEffect(() => {
-    if (isAuthenticated && !isLoading && purchasedUpgrades.length >= 0) {
+    if (isAuthenticated && !isGuest && !isLoading && purchasedUpgrades.length >= 0) {
       updateGameState({ purchased_upgrades: purchasedUpgrades })
         .catch((error) => {
           console.error("Failed to save purchased upgrades:", error);
+          handleGameStateError(error);
         });
     }
-  }, [purchasedUpgrades, isAuthenticated, isLoading]);
+  }, [purchasedUpgrades, isAuthenticated, isGuest, isLoading, handleGameStateError]);
 
   const buyUpgrade = useCallback((cost: number, upgradeId: string): boolean => {
     if (treasury >= cost) {
@@ -123,8 +138,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setTreasuryState(newTreasury);
       setPurchasedUpgradesState(newUpgrades);
       
-      // Save to database if authenticated
-      if (isAuthenticated && !isLoading) {
+      // Save to database if authenticated (not guest)
+      if (isAuthenticated && !isGuest && !isLoading) {
         updateGameState({ 
           treasury: newTreasury, 
           purchased_upgrades: newUpgrades 
@@ -147,18 +162,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
           }
         }).catch((error) => {
           console.error("Failed to save upgrade purchase:", error);
-          toast.error("Failed to save upgrade purchase", { duration: 3000 });
+          handleGameStateError(error);
+          toast.error("Kon upgrade niet opslaan. Log opnieuw in.", { duration: 4000 });
         });
       }
       
       return true;
     }
     return false;
-  }, [treasury, purchasedUpgrades, isAuthenticated, isLoading]);
+  }, [treasury, purchasedUpgrades, isAuthenticated, isGuest, isLoading, handleGameStateError]);
 
   // Function to refresh game state from database
   const refreshGameState = useCallback(async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || isGuest) return;
     
     try {
       const state = await getGameState();
@@ -166,10 +182,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setPurchasedUpgradesState(state.purchased_upgrades);
       setReadersState(state.readers);
       setCredibilityState(state.credibility);
+      setPublishStreakState(state.publish_streak ?? 0);
+      setLastPublishDateState(state.last_publish_date ?? null);
     } catch (error) {
       console.error("Failed to refresh game state:", error);
+      handleGameStateError(error);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isGuest, handleGameStateError]);
 
   return (
     <GameContext.Provider
@@ -182,6 +201,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
         buyUpgrade,
         readers,
         credibility,
+        publishStreak,
+        lastPublishDate,
         refreshGameState,
       }}
     >

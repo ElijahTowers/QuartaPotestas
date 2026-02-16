@@ -1,6 +1,7 @@
 """
 AI Service for interacting with Ollama to generate article variants and extract metadata.
 """
+import os
 import ollama
 from typing import Dict, Any, List
 import json
@@ -10,7 +11,7 @@ import re
 class AIService:
     """Service for processing articles through Ollama LLM."""
     
-    DEFAULT_MODEL = "llama3"  # Default Ollama model
+    DEFAULT_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")  # Override via OLLAMA_MODEL in .env
     
     @staticmethod
     def simplify_english(text: str, model: str = None, max_words: int = None) -> str:
@@ -30,15 +31,18 @@ class AIService:
         
         word_limit_instruction = ""
         if max_words:
-            word_limit_instruction = f"""
+                word_limit_instruction = f"""
 CRITICAL WORD LIMIT: You are creating a HEADLINE/TITLE. The output MUST be EXACTLY {max_words} words or fewer. 
 Count your words carefully. This is a headline, not a full sentence - be concise and impactful.
 If the original text is longer, create a shorter headline version that captures the essence in {max_words} words or less.
-DO NOT exceed {max_words} words. If you do, your response is invalid."""
+DO NOT exceed {max_words} words. If you do, your response is invalid.
+PRESERVE FOCUS: Keep the SAME subject (who) and SAME main action (what). E.g. "Obama addresses video" stays about Obama addressing, not "Trump shares video"."""
         
         prompt = f"""Rewrite the following text in simpler, easier-to-understand English. 
 Keep the meaning and key facts the same, but use simpler words and shorter sentences.
 Make it accessible for readers with a basic understanding of English.
+
+CRITICAL - PRESERVE THE SAME MESSAGE AND FOCUS: When rewriting, you MUST keep the SAME subject, the SAME main action, and the SAME narrative angle as the original. Do NOT shift focus from one actor to another. Examples: If the original says "Obama addresses X", your output must focus on Obama addressing, NOT on someone else doing X. If the original says "A responds to B", keep A as the subject who responds. Do NOT flip or invert the narrative. The reader of your output must get the SAME core message as the original.
 
 CRITICAL: You MUST preserve ALL geographical information:
 - Country names (e.g., "Swiss", "Switzerland", "American", "French", "German")
@@ -63,7 +67,7 @@ Simplified text:"""
                 messages=[
                     {
                         "role": "system",
-                        "content": f"""You are a skilled editor who rewrites text in simpler, clearer English. You maintain the original meaning while making it easier to understand. You ALWAYS preserve geographical information like country names, city names, regions, continents, languages, and nationalities exactly as they appear in the original text.{" When creating headlines or titles, you MUST strictly adhere to word limits and count your words carefully." if max_words else ""}"""
+                        "content": f"""You are a skilled editor who rewrites text in simpler, clearer English. You maintain the original meaning while making it easier to understand. You ALWAYS preserve geographical information like country names, city names, regions, continents, languages, and nationalities exactly as they appear in the original text. CRITICAL: You MUST preserve the SAME subject and SAME main action - do NOT shift focus from one actor to another (e.g. if the original says "Obama addresses X", your output must focus on Obama addressing, NOT on someone else doing X).{" When creating headlines or titles, you MUST strictly adhere to word limits and count your words carefully." if max_words else ""}"""
                     },
                     {
                         "role": "user",
@@ -273,15 +277,19 @@ Primary country/region:"""
     def generate_article_variants(
         title: str,
         content: str,
-        model: str = None
+        model: str = None,
+        rss_title_anchor: str = None,
+        rss_summary_anchor: str = None
     ) -> Dict[str, Any]:
         """
         Generate three variants (Factual, Sensationalist, Propaganda) and extract metadata.
         
         Args:
-            title: Original article title
-            content: Original article content/summary
+            title: Article title (may be simplified)
+            content: Article content/summary (can be full article text)
             model: Ollama model name (defaults to DEFAULT_MODEL)
+            rss_title_anchor: Original RSS title to anchor the model when content is long/full-page.
+            rss_summary_anchor: RSS summary - reinforces correct story when page has related articles.
             
         Returns:
             Dictionary with processed_variants, tags, sentiment, location_city, country_code
@@ -289,13 +297,32 @@ Primary country/region:"""
         if model is None:
             model = AIService.DEFAULT_MODEL
         
+        anchor_block = ""
+        if (rss_title_anchor and rss_title_anchor.strip()) or (rss_summary_anchor and rss_summary_anchor.strip()):
+            parts = []
+            if rss_title_anchor and rss_title_anchor.strip():
+                parts.append(f'Title: "{rss_title_anchor.strip()}"')
+            if rss_summary_anchor and rss_summary_anchor.strip():
+                summary_short = (rss_summary_anchor.strip()[:300] + "…") if len(rss_summary_anchor) > 300 else rss_summary_anchor.strip()
+                parts.append(f"Summary: {summary_short}")
+            anchor_block = f"""
+ANCHOR - MANDATORY: The article is about this story and NO OTHER:
+{chr(10).join(parts)}
+
+Your variants MUST describe this story ONLY. The full text below may include "Related", "More from", or sidebar content about OTHER stories. IGNORE those completely. Extract variants ONLY for the anchored story above.
+"""
+        
         prompt = f"""You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content.
 
 Given the following news article, create THREE DISTINCTLY DIFFERENT variants of the same story.
+{anchor_block}
+LONG INPUT WARNING: The article content below may be 500+ words (full article text). Do NOT summarize the whole text. Extract ONLY the CORE EVENT - the main news: who did what, when, where. Focus on the central story. Do not regurgitate every detail. Your output MUST remain short: title 5-10 words, body 50-100 words per variant.
 
 CRITICAL REQUIREMENT: You MUST provide ALL THREE variants. The JSON response MUST contain exactly these keys: "factual", "sensationalist", "propaganda". Each variant must be an object with "title" (5-10 words) and "body" (50-100 words).
 
 IMPORTANT: Each variant MUST be UNIQUE and DIFFERENT from the others. They should have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants.
+
+CRITICAL - SAME CORE MESSAGE: All three variants (factual, sensationalist, propaganda) must convey the SAME core message as the original article. Keep the SAME subject (who), the SAME main action/event (what), and the SAME narrative angle. Only the TONE and WORDING change (neutral vs dramatic vs positive). Do NOT flip the focus: if the article is about "Obama addresses X", do NOT write "Trump shares X". Do NOT introduce different actors as the main subject. The factual variant should be the closest to the original message; sensationalist and propaganda add spin but preserve who did what to whom.
 
 1. FACTUAL: Write a dry, boring, objective news report. Just the facts. No emotion. Use neutral language.
    - Title: Objective, neutral headline (5-10 words)
@@ -309,11 +336,11 @@ IMPORTANT: Each variant MUST be UNIQUE and DIFFERENT from the others. They shoul
    - Title: Positive, supportive headline (5-10 words)
    - Body: Propaganda report (50-100 words)
 
-Additionally, extract:
-- TOPIC_TAGS: List of topic tags (e.g., ["WAR", "TECH", "ECONOMY", "POLITICS", "CLIMATE", "HEALTH"])
-- SENTIMENT: Overall sentiment (positive/negative/neutral)
-- LOCATION_CITY: The primary city mentioned in the article (or "Unknown" if none)
-- COUNTRY_CODE: The ISO 3166-1 alpha-2 country code (e.g., "US", "NL", "JP", "GB", "GLOBAL", or "XX" if unknown)
+CRITICAL - METADATA EXTRACTION (do NOT use generic values):
+- TAGS: Extract 1-3 SPECIFIC topic tags from the article content. Use: WAR, TECH, ECONOMY, POLITICS, CLIMATE, HEALTH, CRIME, DIPLOMACY, SPORTS, etc. NEVER use "general" - always pick the most specific applicable tags (e.g. a tech story = ["TECH"], a war story = ["WAR", "POLITICS"]).
+- SENTIMENT: Analyze the article tone. Use "positive" for good news, "negative" for bad/dramatic news, "neutral" only for purely factual/balanced reporting. Most news is negative or neutral - pick based on the actual tone.
+- LOCATION_CITY: Extract the PRIMARY city or country mentioned (e.g. "London", "Washington", "Kyiv", "Beijing"). Use "Unknown" ONLY if the article truly mentions no specific place. Check the article content carefully - most BBC articles mention at least one location.
+- COUNTRY_CODE: ISO 3166-1 alpha-2 (US, GB, NL, FR, DE, JP, etc.). "GLOBAL" for worldwide stories. "XX" only if no country is mentioned at all.
 - ASSISTANT_COMMENT: A short, cynical QUESTION (1 sentence, max 15 words) from your perspective as a profit-driven editor. You MUST read and understand the specific article content. Ask a relevant question that references specific details, people, places, or events mentioned in the article. The question should be cynical and focused on circulation/impact, NOT generic. Focus on: What angle will sell, who will be affected, what's the real story behind this, or what's the political/economic fallout. NEVER provide moral lessons, ethical guidance, or lectures on societal values. NEVER mention 'journalistic integrity', 'consent', or 'supporting victims' in a sincere way. Do NOT judge potential choices. Be cynical and focused on circulation.
 - AUDIENCE_SCORES: Analyze how EACH VARIANT of this story will be received by 8 distinct factions. Each variant (factual, sensationalist, propaganda) will have DIFFERENT impacts on each faction. Assign a score from -10 to +10 for EACH faction for EACH variant based on how they would react to that specific variant. The 8 factions are:
   * elite: Wealthy, pro-business, anti-tax. They like: tax cuts, deregulation, corporate success, economic growth. They dislike: wealth redistribution, regulation, anti-business sentiment.
@@ -365,9 +392,9 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
         "title": "Positive headline (5-10 words)",
         "body": "50-100 word propaganda version..."
     }},
-    "tags": ["TAG1", "TAG2"],
+    "tags": ["SPECIFIC_TAG1", "SPECIFIC_TAG2"],
     "sentiment": "positive|negative|neutral",
-    "location_city": "City Name",
+    "location_city": "City or country from article",
     "country_code": "XX",
     "assistant_comment": "One cynical QUESTION (max 15 words) referencing specific article details, focused on profit/circulation/impact",
     "audience_scores": {{
@@ -410,13 +437,14 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. CRITICAL: All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must be objects with 'title' (5-10 words) and 'body' (50-100 words). Each variant must be UNIQUE and DIFFERENT from each other. Each variant must have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with three keys: 'factual', 'sensationalist', 'propaganda'. Each variant key must contain an object with all 8 faction keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each faction value must be an integer from -10 to +10 representing how that faction would react to that specific variant of the story."
+                        "content": "You are the Editor-in-Chief of a dystopian tabloid. You are cynical, profit-driven, and focused solely on circulation numbers and public impact. You view tragedy as opportunity and chaos as content. You MUST respond with valid JSON only. Do not include any text before or after the JSON object. The JSON must be properly formatted with all strings in double quotes. The JSON MUST contain exactly these keys: 'factual', 'sensationalist', 'propaganda', 'tags', 'sentiment', 'location_city', 'country_code', 'assistant_comment', 'audience_scores'. CRITICAL: All three variant keys (factual, sensationalist, propaganda) are REQUIRED and must be objects with 'title' (5-10 words) and 'body' (50-100 words). Each variant must be UNIQUE and DIFFERENT from each other. Each variant must have different wording, tone, and emphasis. DO NOT copy the same text for multiple variants. The 'assistant_comment' must be ONE short cynical QUESTION (max 15 words) that references SPECIFIC details from the article (names, places, events, numbers). It must be relevant to THIS specific article, not generic. Focus on circulation, political fallout, or what angle will sell. NEVER provide moral lessons, ethical guidance, or mention 'journalistic integrity' or 'supporting victims' sincerely. Be cynical and profit-focused. The 'audience_scores' must be an object with three keys: 'factual', 'sensationalist', 'propaganda'. Each variant key must contain an object with all 8 faction keys: 'elite', 'working_class', 'patriots', 'syndicate', 'technocrats', 'faithful', 'resistance', 'doomers'. Each faction value must be an integer from -10 to +10 representing how that faction would react to that specific variant of the story. CRITICAL for metadata: 'tags' must be SPECIFIC (WAR, TECH, POLITICS, etc.) - NEVER use 'general'. 'sentiment' must reflect the article (positive/negative/neutral). 'location_city' and 'country_code' must be extracted from the article - use Unknown/XX only when no location is mentioned."
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
-                ]
+                ],
+                format="json",
             )
             
             # Handle different response formats
@@ -689,6 +717,8 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                     tags = ["GENERAL"]
                 if not tags:
                     tags = ["GENERAL"]
+                if tags == ["GENERAL"] or (len(tags) == 1 and str(tags[0]).lower() == "general"):
+                    print(f"WARNING: Article '{title[:40]}...' got generic tags {result.get('tags')} - AI may need better metadata extraction")
                 
                 # Validate sentiment
                 sentiment = result.get("sentiment", "neutral")
@@ -699,6 +729,8 @@ Respond ONLY with valid JSON. The JSON object MUST have exactly these keys:
                 location_city = result.get("location_city", "Unknown")
                 if not location_city or location_city == "":
                     location_city = "Unknown"
+                if location_city == "Unknown":
+                    print(f"WARNING: Article '{title[:40]}...' got unknown location (AI returned: {result.get('location_city')})")
                 
                 # Validate country code (NEW)
                 country_code = result.get("country_code", "XX")

@@ -83,61 +83,51 @@ def parse_json_field(value: str | dict) -> dict:
 
 def filter_duplicate_articles(articles: List[dict]) -> List[dict]:
     """
-    Filter duplicate articles by original_title, keeping only the latest version.
-    Uses published_at or created timestamp to determine which is latest.
+    Filter duplicate articles by source_url (RSS link), keeping only the latest version per URL.
+    We do NOT deduplicate by original_title so different stories (e.g. two "Savannah" articles) both show.
     """
     if not articles or len(articles) == 0:
         return articles
-    
-    # Group articles by original_title
-    articles_by_title = {}
+
+    def sort_key(art):
+        pub_at = art.get("published_at")
+        if pub_at:
+            try:
+                if isinstance(pub_at, str):
+                    from dateutil import parser as date_parser
+                    return date_parser.parse(pub_at).timestamp()
+                return pub_at.timestamp() if hasattr(pub_at, 'timestamp') else 0
+            except Exception:
+                pass
+        created = art.get("created")
+        if created:
+            try:
+                if isinstance(created, str):
+                    from dateutil import parser as date_parser
+                    return date_parser.parse(created).timestamp()
+                return created.timestamp() if hasattr(created, 'timestamp') else 0
+            except Exception:
+                pass
+        return art.get("id", "")
+
+    # Group by source_url; keep one per URL (latest by published_at/created)
+    by_url: dict = {}
     for article in articles:
-        title = article.get("original_title", "").strip()
-        if not title:
-            continue  # Skip articles without title
-        
-        if title not in articles_by_title:
-            articles_by_title[title] = []
-        articles_by_title[title].append(article)
-    
-    # For each title, keep only the latest article
+        url = (article.get("source_url") or "").strip()
+        if not url:
+            # No URL: keep by id so we don't drop them
+            by_url[f"__no_url_{article.get('id', '')}"] = [article]
+            continue
+        if url not in by_url:
+            by_url[url] = []
+        by_url[url].append(article)
+
     unique_articles = []
-    for title, title_articles in articles_by_title.items():
-        if len(title_articles) == 1:
-            # Only one article with this title, keep it
-            unique_articles.append(title_articles[0])
-        else:
-            # Multiple articles with same title, keep the latest one
-            # Sort by published_at (newest first), then by created, then by id
-            def sort_key(art):
-                # Try published_at first
-                pub_at = art.get("published_at")
-                if pub_at:
-                    try:
-                        if isinstance(pub_at, str):
-                            from dateutil import parser as date_parser
-                            return date_parser.parse(pub_at).timestamp()
-                        return pub_at.timestamp() if hasattr(pub_at, 'timestamp') else 0
-                    except:
-                        pass
-                
-                # Fallback to created timestamp
-                created = art.get("created")
-                if created:
-                    try:
-                        if isinstance(created, str):
-                            from dateutil import parser as date_parser
-                            return date_parser.parse(created).timestamp()
-                        return created.timestamp() if hasattr(created, 'timestamp') else 0
-                    except:
-                        pass
-                
-                # Last resort: use ID (newer IDs are typically higher)
-                return art.get("id", "")
-            
-            sorted_articles = sorted(title_articles, key=sort_key, reverse=True)
-            unique_articles.append(sorted_articles[0])  # Keep the first (newest) one
-    
+    for _url, group in by_url.items():
+        sorted_group = sorted(group, key=sort_key, reverse=True)
+        unique_articles.append(sorted_group[0])
+    # Preserve original order by published_at (newest first)
+    unique_articles.sort(key=sort_key, reverse=True)
     return unique_articles
 
 

@@ -409,6 +409,21 @@ def _compute_scheduled_runs(next_run_time, interval_minutes: int, count: int = 1
     return out
 
 
+@router.get("/bbc-rss")
+async def bbc_rss_debug(current_user: dict = Depends(get_current_user)):
+    """
+    Debug feed: raw BBC World RSS, chronological (newest first).
+    Only for lowiehartjes@gmail.com.
+    """
+    email = (current_user.get("email") or "").strip().lower()
+    if email != ADMIN_EMAIL.lower():
+        raise HTTPException(status_code=403, detail="Access denied")
+    from app.services.rss_service import RSSService
+    url = "https://feeds.bbci.co.uk/news/world/rss.xml"
+    items = RSSService.fetch_feed_raw(url, limit=50)
+    return {"items": items, "source": url}
+
+
 @router.get("/rss-poll-status")
 async def rss_poll_status(current_user: dict = Depends(get_current_user)):
     """

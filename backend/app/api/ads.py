@@ -104,7 +104,7 @@ async def get_ads(
                     total=len(ads),
                 )
             else:
-                error_text = await response.atext() if hasattr(response, 'atext') else response.text
+                error_text = response.text
                 print(f"[/api/ads] Error: {error_text[:300]}")
                 raise HTTPException(
                     status_code=response.status_code,
