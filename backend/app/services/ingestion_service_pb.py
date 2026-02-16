@@ -186,10 +186,17 @@ class IngestionServicePB:
         # Get existing article source URLs from PocketBase (RSS link = unique id)
         self._step(on_step, "Bestaande artikelen in PB vergelijken…")
         existing_source_urls = await self._get_existing_article_source_urls()
-        new_raw_articles = [
-            a for a in raw_articles
-            if (a.get("link") or "").strip() and (a.get("link") or "").strip() not in existing_source_urls
-        ]
+        # Dedupe by link: same URL may appear in multiple feeds or from parallel runs
+        seen_links: set = set()
+        new_raw_articles = []
+        for a in raw_articles:
+            link = (a.get("link") or "").strip()
+            if not link:
+                continue
+            if link in existing_source_urls or link in seen_links:
+                continue
+            seen_links.add(link)
+            new_raw_articles.append(a)
         skipped_existing = len(raw_articles) - len(new_raw_articles)
         if skipped_existing:
             print(f"[IngestionServicePB] Skipping {skipped_existing} articles already in PocketBase (by source_url)")
@@ -353,9 +360,13 @@ class IngestionServicePB:
                     "doomers": 0,
                 })
                 
-                # Uniqueness is by source_url only (already filtered at start).
-                # We do NOT skip by original_title: different articles (different URLs) can have
-                # similar simplified titles (e.g. two "Savannah" stories) and should both be stored.
+                # Re-check source_url before create: another ingestion run may have added it (race condition)
+                source_url = (raw_article.get("link") or "").strip()
+                if source_url:
+                    check = await self.pb.get_list("articles", per_page=1, filter=f'source_url = "{source_url}"')
+                    if check:
+                        self._step(on_step, "  (skipped: already exists, concurrent run?)")
+                        continue
                 step_timings["check_duplicate"] = 0
 
                 # Create article in PocketBase (include source_url for incremental RSS runs)
